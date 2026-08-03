@@ -1,0 +1,92 @@
+{
+  "train_shards": [
+    {
+      "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\gutenberg_train_000.bin",
+      "num_tokens": 100000000,
+      "file_size": 200001024,
+      "sha256": "bf20f1b87485d46ec78b0a31cbe0e58d97d91b54ce20d187d3969857aaf3fb66",
+      "magic": 20240520,
+      "version": 1
+    },
+    {
+      "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\gutenberg_train_001.bin",
+      "num_tokens": 100000000,
+      "file_size": 200001024,
+      "sha256": "a740a701b265f160ccb2b69470204691c89adfa1bc7524a7454ea942a6bdad53",
+      "magic": 20240520,
+      "version": 1
+    },
+    {
+      "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\gutenberg_train_002.bin",
+      "num_tokens": 100000000,
+      "file_size": 200001024,
+      "sha256": "4ab9a5ac80d20c2d42ae51ceaf723dfb4168c8a447e3f853afc633aef5e5195b",
+      "magic": 20240520,
+      "version": 1
+    },
+    {
+      "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\gutenberg_train_003.bin",
+      "num_tokens": 100000000,
+      "file_size": 200001024,
+      "sha256": "72b51ac360be681df427ca4ca2b726e04e9d8eb150c6860b2df233976083f842",
+      "magic": 20240520,
+      "version": 1
+    },
+    {
+      "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\gutenberg_train_004.bin",
+      "num_tokens": 62267303,
+      "file_size": 124535630,
+      "sha256": "8183eeedfaf033e13e56a6b86f8fffaa75be64874dffd1535b2a838ebddef3e9",
+      "magic": 20240520,
+      "version": 1
+    }
+  ],
+  "val_shards": [
+    {
+      "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\gutenberg_val_000.bin",
+      "num_tokens": 4333759,
+      "file_size": 8668542,
+      "sha256": "fc00bb7512754855e1dd4c4da3844f247fb5f3db05314977f8e3c39a06cee78d",
+      "magic": 20240520,
+      "version": 1
+    }
+  ],
+  "total_train_tokens": 462267303,
+  "total_val_tokens": 4333759,
+  "num_train_books": 3178,
+  "num_val_books": 29,
+  "tokenizer": "gpt2",
+  "vocab_size": 50304,
+  "eot_token": 50256,
+  "doc_separator": "eot_prefix_per_document",
+  "val_split": "whole_book_holdout",
+  "val_books_path": "val_books.json",
+  "quality_filter": "tier1_heuristic",
+  "quality_thresholds": {
+    "min_chars": 5000,
+    "max_digit_ratio": 0.05,
+    "min_alpha_ratio": 0.8,
+    "max_dup_line_frac": 0.32,
+    "max_upper_ratio": 0.14,
+    "min_sentence_words": 5.0,
+    "max_sentence_words": 90.0
+  },
+  "dedup": {
+    "method": "minhash_lsh_plus_blockwise_prefilter",
+    "verification": "full_word_5gram_jaccard",
+    "jaccard_threshold": 0.8,
+    "minhash_candidate_floor": 0.5,
+    "num_permutations": 120,
+    "bands": 12,
+    "rows_per_band": 10,
+    "shingle_words": 5,
+    "content_sample_modulus": 64,
+    "sparse_exact_candidate_below": 8,
+    "clusters": 20,
+    "documents_dropped": 20
+  },
+  "slices": {
+    "backbone": 422078163,
+    "register": 40189140
+  }
+}
