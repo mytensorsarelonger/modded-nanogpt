@@ -5,17 +5,16 @@ literary LM (see [PLAN.md](PLAN.md) for why; you don't need to read it to review
 ~3,900 lines across 12 files. Corpus is built: 3,431 Gutenberg books → 3,178 in
 training → 462,267,303 tokens in 5 shards.
 
-**It has now run on a GPU** (Modal L4, ~18 short runs, ~1.4 GPU-hours). The
-launch path, shard integrity, resume, and throughput are all confirmed on real
-hardware — see CHANGELOG *2026-08-06 — first GPU contact*. **No full training run
-has happened**, because one blocker stands in the way:
+**It has now run on a GPU** (Modal L4, ~20 short runs, ~1.6 GPU-hours). Launch
+path, shard integrity, resume, throughput and compile are all confirmed on real
+hardware — see CHANGELOG, 2026-08-06. **No full training run has happened yet**,
+but nothing is blocking one.
 
-> **`torch.compile` NaNs the weights on the second optimizer update**
-> (torch 2.10.0+cu128, sm89). Eager trains correctly. Isolated by elimination —
-> not fused AdamW, not `muon_update`'s own compile, not a stale inductor cache.
-> Costs 3.4× throughput until resolved.
-
-Everything below is written for a reviewer arriving after that finding.
+One finding shaped the current state: `torch.compile` on **torch 2.10.0** NaN'd
+the weights on the second optimizer update. Isolated by elimination (not fused
+AdamW, not `muon_update`'s own compile, not a stale inductor cache), then
+resolved by pinning **torch 2.13.0**, which compiles and trains correctly. The
+control arm is ~4.4 h on A100-40GB at 41,283 tok/s.
 
 **The one framing thing that changes how you review it.** `train_baseline.py` is a
 *control arm*, adapted from `records/track_3_optimization/train_gpt_simple.py`

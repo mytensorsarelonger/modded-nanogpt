@@ -59,9 +59,9 @@ produced a loss curve.
   A cold inductor cache (`--cache-bust`) still NaNs, so this is not the
   poisoned-cache failure MODAL.md §7 warns about. Fused AdamW and `muon_update`'s
   own `@torch.compile` are both innocent; it is the compiled model graph.
-  **Cost impact:** compile is worth 3.4× (10.3 s/step vs 35 s/step), so the
-  control arm is ~3.5 h on A100 compiled and ~12 h eager. Across Phase 0.5's
-  eight swaps that is ~28 GPU-hours vs ~96.
+  **Cost impact** (figures superseded — see the later entry): compile measured
+  2.7×, and the control arm is ~4.4 h on A100 compiled vs ~12.2 h eager.
+  **Resolved** by torch 2.13.0.
 
 ### Fixed (found by running on a GPU)
 
@@ -95,8 +95,9 @@ produced a loss curve.
   `CUBLAS_WORKSPACE_CONFIG=:4096:8` would settle it bitwise.
 - **Gloo on CUDA with `device_id=` works** — MODAL.md had this as speculative.
 - **Shards are byte-identical in the cloud**: sha256 verified per shard.
-- **Throughput: ~51k tok/s, 37.9 TFLOP/s, ~32% MFU on L4**, validating MODAL.md
-  §5's 35% planning assumption.
+- ~~**Throughput: ~51k tok/s, 37.9 TFLOP/s, ~32% MFU on L4.**~~ **Superseded** —
+  this was measured on a run that was computing NaNs. See the 2026-08-06 (later)
+  entry for the corrected figures (41,283 tok/s, 30.7 TFLOP/s).
 - **The NaN guard works.** Divergence exits 0 with a marker in `samples.log`
   rather than a CUDA abort — which is what a 3-hour unattended run needs.
 
