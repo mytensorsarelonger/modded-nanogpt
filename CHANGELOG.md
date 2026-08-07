@@ -10,6 +10,32 @@ from the code alone.
 
 ---
 
+## 2026-08-06 (later) — compile blocker resolved by torch 2.13.0
+
+- **Bumped the Modal image from `torch==2.10.0` to `torch==2.13.0`** (cu130).
+  Compile-enabled training is correct again: 10.826 → 10.209 → 8.506 → 7.299 →
+  6.813, tracking the eager 2.10 curve as it should. So the NaN was a torch-2.10
+  inductor regression against this model, not a defect in the training code.
+- **Throughput correction.** The previously reported "51k tok/s, 32% MFU" came
+  from the 2.10 *compiled* run — which was computing NaNs for most of its steps,
+  so it was never a valid measurement. Measured on the clean 2.13 run instead:
+
+  | | s/step | tok/s | TFLOP/s | A100 est. |
+  |---|---|---|---|---|
+  | 2.10 eager | 35.0 | 14,980 | 11.1 | ~12.2 h |
+  | 2.13 compiled | 12.7 | 41,283 | 30.7 | **~4.4 h** |
+
+  Compile is worth **2.7×**, not the 3.4× estimated from the bad number, and the
+  control arm is ~4.4 h on A100-40GB rather than ~3.5 h. Comfortably inside the
+  6 h function timeout.
+- **The pin is chosen on Linux merit alone now.** With nothing executing locally,
+  `requirements.txt`'s Windows pin constrains no result.
+- *Not re-verified on 2.13:* resume equivalence was established on 2.10 eager.
+  The resume logic is torch-independent (loader arithmetic, state dicts), but the
+  measurement has not been repeated under compile.
+
+---
+
 ## 2026-08-06 — first GPU contact (Modal L4)
 
 The launch path is proven end to end and the corpus is confirmed byte-identical

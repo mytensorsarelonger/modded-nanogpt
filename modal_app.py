@@ -146,7 +146,7 @@ image = (
     modal.Image.debian_slim(python_version="3.12")
     .apt_install("build-essential", "git")
     .pip_install(
-        "torch==2.10.0",
+        "torch==2.13.0",
         "numpy==2.2.6",
         "tiktoken==0.11.0",
         # Always installed, even when tracking is off. Adding a package changes
