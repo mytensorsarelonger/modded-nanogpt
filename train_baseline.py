@@ -261,7 +261,14 @@ def zeropower_via_newtonschulz5(G: Tensor) -> Tensor:
         X = X.mT
     return X
 
-@torch.compile
+# MUON_COMPILE=0 leaves this function eager while the model stays compiled.
+# Diagnostic for a real, reproduced failure: with the whole thing compiled on
+# torch 2.10.0+cu128 / sm89, weights go non-finite on the SECOND optimizer update
+# (val is clean after one update, NaN after two) on a cold inductor cache. This
+# function mutates `grad` in place via grad.lerp_ and runs Newton-Schulz in bf16,
+# which makes it the prime suspect. Compiling the model is worth ~3.4x, so
+# excluding only this is far better than COMPILE=0 if it is sufficient.
+@(torch.compile if os.environ.get("MUON_COMPILE", "1") == "1" else (lambda f: f))
 def muon_update(grad, momentum, mu=0.95, nesterov=True):
     momentum.lerp_(grad, 1 - mu)
     update = grad.lerp_(momentum, mu) if nesterov else momentum
@@ -390,6 +397,19 @@ print0(f"val_tokens={val_tokens:,}  batch_size={batch_size:,}  mbs={mbs}", conso
 
 val_inputs, val_targets = next(distributed_data_generator("data/shards/gutenberg_val_*.bin", val_tokens))
 
+# Seed BEFORE constructing the model. Parameter init draws from the global RNG,
+# so without this every run starts from different weights: two identical 6-step
+# runs were measured 0.0148 apart in val_loss, ~1000x the ~1e-5 discrepancy a
+# checkpoint resume introduces. That noise floor would sit underneath every
+# Phase 0.5 ablation, so a real architecture effect smaller than it would be
+# indistinguishable from the random draw. Override with INIT_SEED to measure the
+# noise floor deliberately (same config, different seed).
+_init_seed = int(os.environ.get("INIT_SEED", config.init_seed))
+torch.manual_seed(_init_seed)
+if CUDA:
+    torch.cuda.manual_seed_all(_init_seed)
+print0(f"init_seed={_init_seed}", console=True)
+
 model = GPT(vocab_size=config.vocab_size, num_layers=config.num_layers,
             model_dim=config.model_dim, head_dim=config.head_dim,
             num_heads=config.num_heads).to(device)
@@ -416,6 +436,7 @@ for _ in range(num_trials):
 
     # we want to minimize this while still reaching 3.28 val loss
     train_steps = int(os.environ.get("TRAIN_STEPS", 10 if SMOKE else config.train_steps))
+    val_every = int(os.environ.get("VAL_EVERY", 0))
     sample_every = int(os.environ.get("SAMPLE_EVERY", config.sample_every))
     checkpoint_every = int(os.environ.get("CHECKPOINT_EVERY", config.checkpoint_every))
 
@@ -443,7 +464,7 @@ for _ in range(num_trials):
                         dict(params=[p for p in model.parameters() if p.ndim < 2],
                              lr=config.adamw_lr_scalars)],
                        betas=config.adamw_betas, eps=config.adamw_eps,
-                       weight_decay=config.adamw_wd, fused=True)
+                       weight_decay=config.adamw_wd, fused=(os.environ.get("ADAMW_FUSED", "1") == "1"))
     optimizer2 = Muon([p for p in model.blocks.parameters() if p.ndim >= 2],
                       lr=config.muon_lr, weight_decay=config.muon_wd)
     optimizers = [optimizer1, optimizer2]
@@ -547,6 +568,53 @@ for _ in range(num_trials):
     print0(f"Data manifest hash: {data_hash}")
     print0(f"Shard recipe hash:  {shard_hash}")
     print0(f"Epochs over corpus: {run_entry['epochs_over_corpus']}")
+
+    # --- Optional W&B (a view; runs/index.jsonl stays the source of truth) ----
+    # Enabled by WANDB=1. Deliberately soft: an unavailable or misconfigured
+    # tracker must never take down a paid training run, so every call is guarded
+    # and failure downgrades to a warning and disables further logging.
+    # run_entry is passed as the W&B config so a chart maps 1:1 back to an
+    # index.jsonl record via config_hash.
+    class _Tracker:
+        def __init__(self):
+            self.run = None
+            if os.environ.get("WANDB", "0") != "1" or dist.get_rank() != 0:
+                return
+            try:
+                import wandb
+                self.wandb = wandb
+                self.run = wandb.init(
+                    project=os.environ.get("WANDB_PROJECT", "k3mini"),
+                    name=f"{short_tag}-{run_id[:8]}",
+                    id=run_id, resume="allow",   # a resumed run continues one chart
+                    config=run_entry,
+                    tags=[short_tag, f"cfg:{cfg_hash}", f"data:{data_hash}"],
+                )
+                print0(f"W&B: logging to {self.run.url}", console=True)
+            except Exception as e:
+                print0(f"W&B disabled ({type(e).__name__}: {e})", console=True)
+                self.run = None
+
+        def log(self, data: dict, step: int):
+            if self.run is None:
+                return
+            try:
+                self.wandb.log(data, step=step)
+            except Exception as e:
+                print0(f"W&B log failed, disabling ({e})", console=True)
+                self.run = None
+
+        def finish(self, summary: dict | None = None):
+            if self.run is None:
+                return
+            try:
+                if summary:
+                    self.run.summary.update(summary)
+                self.wandb.finish()
+            except Exception:
+                pass
+
+    tracker = _Tracker()
 
     # --- Checkpointing ---
     ckpt_dir = runs_dir / run_id
@@ -703,6 +771,14 @@ for _ in range(num_trials):
             logits = logits[0, -1] / temperature
             logits[n_real_tokens:] = float("-inf")   # never sample padding
             probs = F.softmax(logits, dim=-1)
+            # A diverged model makes probs non-finite, and torch.multinomial then
+            # fails with a device-side assert whose traceback points here rather
+            # than at the divergence. One cheap check per token converts an opaque
+            # CUDA abort -- potentially hours into a paid run -- into a diagnosis.
+            if not torch.isfinite(probs).all():
+                return ("<NON-FINITE LOGITS: model has diverged; "
+                        "sampling aborted at "
+                        f"{generated.size(1) - input_ids.size(1)} new tokens>")
             next_token = torch.multinomial(probs, num_samples=1, generator=gen)
             generated = torch.cat([generated, next_token.unsqueeze(0)], dim=1)
         # Decode only the new tokens rather than char-slicing the decoded string by
@@ -798,12 +874,21 @@ for _ in range(num_trials):
     # start the clock
     training_time = 0
     last_val_step = start_step
+    # Device-side accumulators: adding a detached scalar is a trivial GPU op with
+    # no host sync, unlike .item() every step.
+    train_loss_accum = torch.zeros((), device=device)
+    train_tokens_seen = 0
     dist.barrier()
     t0 = time.perf_counter()
     for step in range(start_step, train_steps + 1):
 
         # --------------- VALIDATION SECTION -----------------
-        val_step_freq = 125 if step / train_steps < 0.9 else 25
+        # VAL_EVERY forces a fixed cadence. The stock schedule gives only two
+        # points in a 100-step run (step 0 and the end), which cannot localise a
+        # divergence. Validation is under no_grad and consumes no RNG, so
+        # changing its cadence cannot alter the training trajectory.
+        val_step_freq = (val_every if val_every
+                         else (125 if step / train_steps < 0.9 else 25))
         if step == train_steps or step % val_step_freq == 0:
             # stop the clock
             dist.barrier()
@@ -822,8 +907,24 @@ for _ in range(num_trials):
                     val_loss += model(val_inputs[i*mbs:(i+1)*mbs], val_targets[i*mbs:(i+1)*mbs])
             dist.all_reduce(val_loss, op=dist.ReduceOp.SUM)
             val_loss /= val_tokens
-            print0(f"step:{step}/{train_steps} val_loss:{val_loss:.5f} train_time:{training_time:.3f}s"
+            _tl = (float(train_loss_accum / train_tokens_seen)
+                   if train_tokens_seen > 0 else float("nan"))
+            print0(f"step:{step}/{train_steps} val_loss:{val_loss:.5f} "
+                   f"train_loss:{_tl:.5f} train_time:{training_time:.3f}s"
                    + f" step_avg:{1000*step_avg:.2f}ms", console=True)
+            # Train loss is accumulated as a device tensor and only read here, so
+            # the per-step path stays sync-free (the reference discards the loss
+            # entirely precisely to avoid a sync every step).
+            metrics = {"val/loss": float(val_loss), "perf/step_ms": 1000 * step_avg,
+                       "perf/train_time_s": training_time}
+            if train_tokens_seen > 0:
+                metrics["train/loss"] = float(train_loss_accum / train_tokens_seen)
+                metrics["train/lr_mul"] = optimizers[-1].param_groups[0]["lr"] / \
+                    optimizers[-1].param_groups[0]["initial_lr"]
+            metrics["train/tokens"] = step * batch_size
+            tracker.log(metrics, step=step)
+            train_loss_accum = torch.zeros((), device=device)
+            train_tokens_seen = 0
             model.train()
             # start the clock again
             dist.barrier()
@@ -849,19 +950,36 @@ for _ in range(num_trials):
             break
 
         if step > start_step:
+            # Sampling and checkpointing are not training, so their cost must not
+            # land in training_time. But the previous version reset t0 here on
+            # EVERY step, which meant `time_since_last_val` at the next validation
+            # measured a single step instead of the whole window -- understating
+            # step_avg and train_time_s by roughly the window length, and writing
+            # that wrong wall-clock into the run registry. Shift t0 forward by the
+            # excluded duration instead: overhead is removed, window start is kept.
+            _extra_t0 = time.perf_counter()
+            did_extra = False
             if step % sample_every == 0:
                 sample(model, enc, step)
+                did_extra = True
             if step % checkpoint_every == 0:
                 save_checkpoint(model, step, optimizers, loader_pos)
-            dist.barrier()
-            t0 = time.perf_counter()
+                did_extra = True
+            if did_extra:
+                dist.barrier()
+                t0 += time.perf_counter() - _extra_t0
 
         # --------------- TRAINING SECTION -----------------
         inputs, targets = next(train_loader)
         # accumulate across microbatches in case we are running with fewer than 8 gpus
         assert len(inputs) % mbs == 0
         for i in range(len(inputs) // mbs):
-            model(inputs[i*mbs:(i+1)*mbs], targets[i*mbs:(i+1)*mbs]).backward()
+            _loss = model(inputs[i*mbs:(i+1)*mbs], targets[i*mbs:(i+1)*mbs])
+            _loss.backward()
+            # Instrumentation only -- does not touch the update. The model returns
+            # a SUM over tokens, so dividing by tokens later gives mean per-token.
+            train_loss_accum += _loss.detach()
+            train_tokens_seen += targets[i*mbs:(i+1)*mbs].numel()
         for name, p in model.named_parameters():
             assert p.grad is not None, name
             dist.all_reduce(p.grad, op=dist.ReduceOp.SUM)
@@ -885,10 +1003,20 @@ if _rank == 0:
     run_entry["train_time_s"] = round(training_time, 2)
     run_entry["steps_completed"] = train_steps
     run_entry["sample_log"] = str(sample_log_path)
+    # The direct test of resume correctness: an interrupted run and an
+    # uninterrupted one must finish at the SAME corpus position. Loss agreement
+    # implies it, but this states it outright and survives in the registry.
+    run_entry["final_loader_state"] = dict(loader_pos)
+    run_entry["start_step"] = start_step
     run_entry["logfile"] = logfile
     index_path = runs_dir / "index.jsonl"
     with open(index_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(run_entry) + "\n")
     print0(f"Run index updated at {index_path}", console=True)
+    # Mirror the outcome into the W&B summary so the two records agree, then close
+    # the run. Finishing before destroy_process_group keeps print0 usable.
+    tracker.finish({k: run_entry[k] for k in
+                    ("final_val_loss", "train_time_s", "steps_completed",
+                     "epochs_over_corpus") if k in run_entry})
 
 dist.destroy_process_group()

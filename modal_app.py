@@ -149,6 +149,11 @@ image = (
         "torch==2.10.0",
         "numpy==2.2.6",
         "tiktoken==0.11.0",
+        # Always installed, even when tracking is off. Adding a package changes
+        # the image hash, so making it conditional would force an image rebuild
+        # every time you toggled WANDB. One rebuild now, stable thereafter; the
+        # trainer only imports it when WANDB=1.
+        "wandb==0.19.11",
     )
     # Bake the GPT-2 BPE files into the image. Without this, every container
     # cold-start fetches them from openaipublic.blob.core.windows.net, which
@@ -190,6 +195,23 @@ runs_vol = modal.Volume.from_name("k3mini-runs", create_if_missing=True)
 cache_vol = modal.Volume.from_name("k3mini-torch-cache", create_if_missing=True)
 
 VOLUMES = {DATA_MOUNT: data_vol, RUNS_MOUNT: runs_vol, CACHE_MOUNT: cache_vol}
+
+# ---------------------------------------------------------------------------
+# Optional W&B
+# ---------------------------------------------------------------------------
+#
+# Opt-in via a LOCAL env var, read at `modal run` time when this module is
+# imported: WANDB=1 modal run modal_app.py::train
+#
+# The Secret is attached only when enabled, because Secret.from_name() resolves
+# at app startup and would hard-fail every run for anyone who has not created
+# `wandb-secret`. Tracking is a convenience; it must not be able to block a run.
+#
+# One-time setup (the key never passes through this repo):
+#   modal secret create wandb-secret WANDB_API_KEY=<key>
+WANDB_ENABLED = os.environ.get("WANDB", "0") == "1"
+WANDB_PROJECT = os.environ.get("WANDB_PROJECT", "k3mini")
+SECRETS = [modal.Secret.from_name("wandb-secret")] if WANDB_ENABLED else []
 
 app = modal.App(APP_NAME, image=image)
 
@@ -337,8 +359,26 @@ def _validate_resume_target(overrides: dict[str, str]) -> None:
         raise FileNotFoundError(f"Resume checkpoint does not exist: {resume}")
 
 
+def _wandb_overrides(enabled: bool, project: str) -> dict[str, str]:
+    """Env for the trainer's optional tracker.
+
+    WANDB_API_KEY arrives from the attached Secret and is inherited via
+    dict(os.environ). WANDB / WANDB_PROJECT cannot be: they are set on the
+    LOCAL machine at `modal run` time and are absent inside the container, so
+    they must travel as explicit function arguments (same reason git provenance
+    does). Returns {} when disabled, so the trainer never imports wandb.
+    """
+    return {"WANDB": "1", "WANDB_PROJECT": project} if enabled else {}
+
+
 def _build_env(overrides: dict[str, str], gpu_tag: str) -> dict[str, str]:
     env = dict(os.environ)
+    # CACHE_BUST namespaces the inductor/triton cache under an extra path
+    # segment, giving a provably cold compile without deleting a shared Volume.
+    # Two uses: isolating a suspected poisoned cache entry (MODAL.md warns a
+    # container killed mid-compile can leave one), and honest wall-clock for a
+    # run you intend to publish, where first-container compile time counts.
+    cache_bust = overrides.pop("CACHE_BUST", "")
 
     # torchrun vars. train_baseline.py already defaults these to single-process
     # values via setdefault, so this is belt-and-braces: it makes the intended
@@ -367,8 +407,9 @@ def _build_env(overrides: dict[str, str], gpu_tag: str) -> dict[str, str]:
     #     first-container compile time is part of the honest number.
     # Namespaced per GPU so an L4 (sm89) smoke and an A100 (sm80) run cannot
     # interleave entries even if the keying ever regresses.
-    env["TORCHINDUCTOR_CACHE_DIR"] = f"{CACHE_MOUNT}/inductor/{gpu_tag}"
-    env["TRITON_CACHE_DIR"] = f"{CACHE_MOUNT}/triton/{gpu_tag}"
+    _ns = f"{gpu_tag}/{cache_bust}" if cache_bust else gpu_tag
+    env["TORCHINDUCTOR_CACHE_DIR"] = f"{CACHE_MOUNT}/inductor/{_ns}"
+    env["TRITON_CACHE_DIR"] = f"{CACHE_MOUNT}/triton/{_ns}"
     os.makedirs(env["TORCHINDUCTOR_CACHE_DIR"], exist_ok=True)
     os.makedirs(env["TRITON_CACHE_DIR"], exist_ok=True)
 
@@ -527,11 +568,16 @@ def _run_training(overrides: dict[str, str], gpu_tag: str, git_sha: str,
     gpu=SMOKE_GPU,
     timeout=SMOKE_TIMEOUT,
     volumes=VOLUMES,
+    secrets=SECRETS,
     cpu=4.0,
     memory=16384,   # the loader pins a whole 200 MB shard; leave real headroom
     retries=0,
 )
 def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
+          checkpoint_every: int = 0, sample_every: int = 0, val_every: int = 0,
+          compile: bool = True, adamw_fused: bool = True, cache_bust: str = "",
+          muon_compile: bool = True, init_seed: int = 0,
+          wandb: bool = WANDB_ENABLED, wandb_project: str = WANDB_PROJECT,
           git_sha: str = _GIT_SHA, git_dirty: bool = _GIT_DIRTY) -> dict:
     """100 steps on a cheap L4 — buys the CUDA-only code paths for cents.
 
@@ -553,10 +599,31 @@ def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
         {
             "SMOKE": "1",
             "TRAIN_STEPS": str(train_steps),
-            "COMPILE": "1",
-            "BATCH_SIZE": str(64 * 1024),
+            "COMPILE": "1" if compile else "0",
+            "ADAMW_FUSED": "1" if adamw_fused else "0",
+            "MUON_COMPILE": "1" if muon_compile else "0",
+            **({"INIT_SEED": str(init_seed)} if init_seed else {}),
+            **({"CACHE_BUST": cache_bust} if cache_bust else {}),
+            # Deliberately the REAL batch size, not SMOKE's shrunken default.
+            # The LRs in config.py (embed 0.7, Muon 0.025) are tuned for 524288
+            # tokens/step; at 64Ki they are ~8x too aggressive per token and the
+            # run reaches val_loss=nan inside 100 steps. That divergence then
+            # surfaced as a device-side assert in torch.multinomial during
+            # sampling, which reads like a CUDA bug and is not one.
+            # Memory is unaffected: it is set by MBS (8 x 1024 tokens per
+            # microbatch), so a larger batch only means more microbatches per
+            # step -- ~8x the step time on a run that took 1.6s of compute.
+            "BATCH_SIZE": str(524288),
             "MBS": "8",
             "VAL_TOKENS": str(64 * 8192),
+            # 0 means "leave config.py's value alone". Exposed so a resume
+            # equivalence test can force a checkpoint partway through a short
+            # run -- otherwise the only checkpoint is the final one and the
+            # resume path cannot be exercised at all.
+            **({"CHECKPOINT_EVERY": str(checkpoint_every)} if checkpoint_every else {}),
+            **({"SAMPLE_EVERY": str(sample_every)} if sample_every else {}),
+            **({"VAL_EVERY": str(val_every)} if val_every else {}),
+            **_wandb_overrides(wandb, wandb_project),
         },
         gpu_tag=SMOKE_GPU,
         git_sha=git_sha,
@@ -570,13 +637,16 @@ def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
     gpu=TRAIN_GPU,
     timeout=TRAIN_TIMEOUT,
     volumes=VOLUMES,
+    secrets=SECRETS,
     cpu=8.0,
     memory=32768,
     retries=0,
 )
 def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
-          val_tokens: int = 0, compile: bool = True,
+          val_tokens: int = 0, compile: bool = True, adamw_fused: bool = True,
           resume: str = "", resume_dir: str = "",
+          checkpoint_every: int = 0, sample_every: int = 0, val_every: int = 0,
+          wandb: bool = WANDB_ENABLED, wandb_project: str = WANDB_PROJECT,
           git_sha: str = _GIT_SHA, git_dirty: bool = _GIT_DIRTY) -> dict:
     """The full baseline run. 3250 steps on an A100-40GB, ~3.2h, ~$9.
 
@@ -597,11 +667,22 @@ def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
     Constraint from the script: 524288 % (1024*mbs) == 0, so mbs must divide 512.
     """
     overrides = {"TRAIN_STEPS": str(train_steps), "MBS": str(mbs),
-                 "COMPILE": "1" if compile else "0"}
+                 "COMPILE": "1" if compile else "0",
+                 "ADAMW_FUSED": "1" if adamw_fused else "0",
+            "MUON_COMPILE": "1" if muon_compile else "0",
+            **({"INIT_SEED": str(init_seed)} if init_seed else {}),
+            **({"CACHE_BUST": cache_bust} if cache_bust else {}),
+                 **_wandb_overrides(wandb, wandb_project)}
     if batch_size:
         overrides["BATCH_SIZE"] = str(batch_size)
     if val_tokens:
         overrides["VAL_TOKENS"] = str(val_tokens)
+    if checkpoint_every:
+        overrides["CHECKPOINT_EVERY"] = str(checkpoint_every)
+    if sample_every:
+        overrides["SAMPLE_EVERY"] = str(sample_every)
+    if val_every:
+        overrides["VAL_EVERY"] = str(val_every)
     return _run_training(overrides, gpu_tag=TRAIN_GPU, git_sha=git_sha,
                          git_dirty=git_dirty, resume=resume,
                          resume_dir=resume_dir)
@@ -611,12 +692,14 @@ def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
     gpu=BIG_GPU,
     timeout=BIG_TIMEOUT,
     volumes=VOLUMES,
+    secrets=SECRETS,
     cpu=8.0,
     memory=32768,
     retries=0,
 )
 def train_h100(train_steps: int = 3250, mbs: int = 16,
                resume: str = "", resume_dir: str = "",
+               wandb: bool = WANDB_ENABLED, wandb_project: str = WANDB_PROJECT,
                git_sha: str = _GIT_SHA, git_dirty: bool = _GIT_DIRTY) -> dict:
     """Same run on an H100. Higher $/hr, fewer hours — often cheaper overall.
 
@@ -627,7 +710,8 @@ def train_h100(train_steps: int = 3250, mbs: int = 16,
     80 GB of HBM does let MBS default to 16 here.
     """
     return _run_training(
-        {"TRAIN_STEPS": str(train_steps), "MBS": str(mbs), "COMPILE": "1"},
+        {"TRAIN_STEPS": str(train_steps), "MBS": str(mbs), "COMPILE": "1",
+         **_wandb_overrides(wandb, wandb_project)},
         gpu_tag=BIG_GPU, git_sha=git_sha, git_dirty=git_dirty,
         resume=resume, resume_dir=resume_dir,
     )

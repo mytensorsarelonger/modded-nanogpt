@@ -3,8 +3,19 @@
 **What this is.** Data pipeline + control-arm training script for a from-scratch
 literary LM (see [PLAN.md](PLAN.md) for why; you don't need to read it to review).
 ~3,900 lines across 12 files. Corpus is built: 3,431 Gutenberg books → 3,178 in
-training → 462,267,303 tokens in 5 shards. **Nothing has run on a GPU yet** — everything
-is verified on CPU at ≤6 steps, so every CUDA-only path is unexecuted code.
+training → 462,267,303 tokens in 5 shards.
+
+**It has now run on a GPU** (Modal L4, ~18 short runs, ~1.4 GPU-hours). The
+launch path, shard integrity, resume, and throughput are all confirmed on real
+hardware — see CHANGELOG *2026-08-06 — first GPU contact*. **No full training run
+has happened**, because one blocker stands in the way:
+
+> **`torch.compile` NaNs the weights on the second optimizer update**
+> (torch 2.10.0+cu128, sm89). Eager trains correctly. Isolated by elimination —
+> not fused AdamW, not `muon_update`'s own compile, not a stale inductor cache.
+> Costs 3.4× throughput until resolved.
+
+Everything below is written for a reviewer arriving after that finding.
 
 **The one framing thing that changes how you review it.** `train_baseline.py` is a
 *control arm*, adapted from `records/track_3_optimization/train_gpt_simple.py`
@@ -32,7 +43,7 @@ bug, not an improvement.
    error. The shared recurrence and resume metadata invariants now have focused
    tests; full-scale training remains unrun.
 3. **Setup block in `train_baseline.py`** (~lines 300–340) and `save/load_checkpoint`.
-   Every CUDA branch here is unexecuted. The earlier self-recursive
+   These CUDA branches have now executed on L4 without error. The earlier self-recursive
    `device_name()` defect is fixed and guarded by the Modal preflight; still
    scrutinize fused AdamW, Gloo CUDA collectives, bf16, compile, and rank-local
    checkpoint sidecars.
@@ -40,10 +51,9 @@ bug, not an improvement.
    pass, both imported helper modules are in the image, resume paths are
    constrained to the runs Volume, and git provenance is forwarded to the
    trainer. The remaining
-   first-contact risks are the nested data Volume mount and the actual CUDA
-   tensor/compile/memory paths; run the L4 smoke before an A100. The pinned
-   PyTorch v2.10.0 source explicitly supports Gloo on CUDA and safely binds the
-   supplied CUDA `device_id`, so that API combination is no longer speculative.
+   nested data Volume mount, Gloo-on-CUDA with `device_id=`, and the shard
+   round-trip are all now confirmed working against the real service. The open
+   item is the compile NaN above, not the launcher.
 5. **`data/quality_filter.py` thresholds.** Empirically tuned by inspecting a
    200-book sample, then applied to 3,431 books; the borderline cases still need
    a human policy pass at the new scale. It drops 177 documents after dedup. Check

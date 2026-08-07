@@ -10,6 +10,99 @@ from the code alone.
 
 ---
 
+## 2026-08-06 — first GPU contact (Modal L4)
+
+The launch path is proven end to end and the corpus is confirmed byte-identical
+in the cloud. One blocker found, which is the reason Milestone 1 has still not
+produced a loss curve.
+
+### Blocked
+
+- **`torch.compile` produces NaN weights on the second optimizer update**
+  (torch 2.10.0+cu128, L4/sm89). Eager mode trains correctly from `ln(50304)`:
+  10.826 → 10.190 → 8.488 → 7.306 → 6.816. Isolated by elimination, not guessed:
+
+  | model compile | muon compile | fused AdamW | result |
+  |---|---|---|---|
+  | on | on | on | NaN at update 2 |
+  | on | on | off | NaN at update 2 |
+  | on | off | on | NaN at update 2 |
+  | off | eager | off | trains ✓ |
+  | off | eager | on | trains ✓ |
+
+  A cold inductor cache (`--cache-bust`) still NaNs, so this is not the
+  poisoned-cache failure MODAL.md §7 warns about. Fused AdamW and `muon_update`'s
+  own `@torch.compile` are both innocent; it is the compiled model graph.
+  **Cost impact:** compile is worth 3.4× (10.3 s/step vs 35 s/step), so the
+  control arm is ~3.5 h on A100 compiled and ~12 h eager. Across Phase 0.5's
+  eight swaps that is ~28 GPU-hours vs ~96.
+
+### Fixed (found by running on a GPU)
+
+- **Wall-clock was understated ~100×.** `t0` was reset at the end of *every*
+  step by the sample/checkpoint block, so `time_since_last_val` measured one step
+  rather than the whole window. Reported `step_avg: 105 ms` when the truth was
+  ~10,300 ms. This fed `train_time_s` in the run registry, so recorded wall-clock
+  — the basis for every cost and throughput comparison in the ablation table —
+  was wrong. Now shifts `t0` forward by the excluded duration instead of
+  clobbering it.
+- **Model init was unseeded.** The only `manual_seed` in the file was the
+  sampler's, so parameter init drew from process entropy. Two identical 6-step
+  runs measured **0.0148** apart in `val_loss` — a noise floor that would have sat
+  underneath all eight Phase 0.5 ablations, making any effect smaller than it
+  indistinguishable from the random draw. Added `config.init_seed`; two runs now
+  match exactly.
+- **Smoke used a batch size 8× too small**, so it exercised a different
+  LR-to-batch ratio than the real run. (This was also my incorrect first
+  diagnosis of the NaN — worth recording, since it looked convincing and was
+  wrong. The full 524,288 batch still NaN'd.)
+
+### Verified on GPU
+
+- **Resume is faithful.** `final_loader_state` matched **exactly** on every
+  resume (`{file_idx: 0, pos: 3145728, batches: 6}`) — the failure mode that
+  would otherwise be silent. `val_loss` agrees to ~1.4e-5 (2.2e-6 relative)
+  against a measured nondeterminism floor of ~1e-5. For scale, a real data or
+  schedule error shows at ~1e-2, as the unseeded-init difference did.
+  *Not closed:* with n=2 per group a sub-noise systematic offset cannot be ruled
+  out; `torch.use_deterministic_algorithms(True)` plus
+  `CUBLAS_WORKSPACE_CONFIG=:4096:8` would settle it bitwise.
+- **Gloo on CUDA with `device_id=` works** — MODAL.md had this as speculative.
+- **Shards are byte-identical in the cloud**: sha256 verified per shard.
+- **Throughput: ~51k tok/s, 37.9 TFLOP/s, ~32% MFU on L4**, validating MODAL.md
+  §5's 35% planning assumption.
+- **The NaN guard works.** Divergence exits 0 with a marker in `samples.log`
+  rather than a CUDA abort — which is what a 3-hour unattended run needs.
+
+### Lesson — run nothing locally
+
+Roughly half the friction in this session was Windows-local-execution friction,
+not project difficulty, and none of it was load-bearing work:
+
+- **cp1252 killed three separate things.** The Gutenberg download died at 371 of
+  3,000 books on a title containing `ā`; the sample log (the *primary
+  instrument*, §7.1) crashed on a CJK glyph from a random-init model; and Modal's
+  own CLI crashed printing a `✓` after a successful upload.
+- **Git Bash MSYS2 path mangling** rewrote the remote path `/gutenberg_train_000.bin`
+  into `C:/Program Files/Git/...`, silently uploading all 890 MB to the wrong
+  place — twice the transfer, and ~933 MB of strays still in the Volume.
+- **PowerShell parsing** broke inline Python twice, once discarding a queued
+  Modal run because the block failed to parse before anything executed.
+- **The torch pin had to split by platform** (2.13.0 on Windows, 2.10.0
+  elsewhere) purely because the 2.10 Windows wheel reports `unsupported gloo
+  device` — a constraint that exists *only* because Python was run locally.
+- Locally, NCCL is unavailable, `torch.compile` needs MSVC, and the GPU is an
+  8 GB laptop card that OOM-killed the first CPU smoke.
+
+PLAN.md §2 and Appendix C already said "do not train on native Windows." The
+drift was that *orchestration* stayed local even after the training moved
+remote. **Standing rule from here: this machine edits files and invokes
+`modal run`. It executes no Python that matters.** A corollary worth acting on:
+the Windows torch pin in `requirements.txt` is now irrelevant to any result, so
+the Linux/Modal pin can be chosen purely on merit.
+
+---
+
 ## [Unreleased] — Milestone 0 complete, Milestone 1 not yet run
 
 ### Corpus (final state)

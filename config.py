@@ -84,10 +84,15 @@ class Config:
     sample_every: int = 250
     # Checkpoints are ~1 GB each, so they get a sparser cadence than samples.
     checkpoint_every: int = 1000
+    # Seeds parameter initialisation. Fixed so two runs of the same config are
+    # comparable: unseeded, two identical 6-step runs measured 0.0148 apart in
+    # val_loss, which would sit as a noise floor under every Phase 0.5 ablation.
+    init_seed: int = 1904
     # Fixed seed, reused at EVERY checkpoint on purpose. Identical sampling
     # randomness at step 500 and step 2500 means any difference you read is a
     # difference in the model, not in the dice. An unseeded sampler folds noise
-    # into exactly the comparison the instrument exists to make.
+    # into exactly the comparison the instrument exists to make. Distinct from
+    # init_seed: this one only seeds the probe suite's generator.
     sample_seed: int = 1899
     # Prompts, temperatures and length live in probes.py — see §7.1.
 
