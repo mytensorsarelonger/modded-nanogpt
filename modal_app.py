@@ -203,15 +203,25 @@ VOLUMES = {DATA_MOUNT: data_vol, RUNS_MOUNT: runs_vol, CACHE_MOUNT: cache_vol}
 # Opt-in via a LOCAL env var, read at `modal run` time when this module is
 # imported: WANDB=1 modal run modal_app.py::train
 #
-# The Secret is attached only when enabled, because Secret.from_name() resolves
-# at app startup and would hard-fail every run for anyone who has not created
-# `wandb-secret`. Tracking is a convenience; it must not be able to block a run.
+# The Secret attachment is UNCONDITIONAL, and that is load-bearing.
 #
-# One-time setup (the key never passes through this repo):
+# It used to be `[Secret.from_name(...)] if WANDB_ENABLED else []`, intending
+# that a missing secret could never block a run. That is wrong, and it fails
+# exactly when you turn tracking on: WANDB is set in the *local* shell at
+# `modal run` time, but the container re-imports this module without it, so the
+# function was declared with 5 objects locally and 4 remotely --
+#   ExecutionError: Function has 4 dependencies but container got 5 object ids.
+# Any Modal object built under a condition that differs between the local and
+# remote import has this bug. Attaching the Secret always keeps both imports
+# identical; the trainer still only imports wandb when WANDB=1, so an unused
+# key costs nothing.
+#
+# Consequence: `wandb-secret` must exist. One-time setup (the key never passes
+# through this repo, and a placeholder is fine if you never enable tracking):
 #   modal secret create wandb-secret WANDB_API_KEY=<key>
 WANDB_ENABLED = os.environ.get("WANDB", "0") == "1"
 WANDB_PROJECT = os.environ.get("WANDB_PROJECT", "k3mini")
-SECRETS = [modal.Secret.from_name("wandb-secret")] if WANDB_ENABLED else []
+SECRETS = [modal.Secret.from_name("wandb-secret")]
 
 app = modal.App(APP_NAME, image=image)
 
