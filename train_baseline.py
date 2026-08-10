@@ -437,6 +437,7 @@ for _ in range(num_trials):
     # we want to minimize this while still reaching 3.28 val loss
     train_steps = int(os.environ.get("TRAIN_STEPS", 10 if SMOKE else config.train_steps))
     val_every = int(os.environ.get("VAL_EVERY", 0))
+    stop_after = int(os.environ.get("STOP_AFTER", 0))
     sample_every = int(os.environ.get("SAMPLE_EVERY", config.sample_every))
     checkpoint_every = int(os.environ.get("CHECKPOINT_EVERY", config.checkpoint_every))
 
@@ -936,6 +937,19 @@ for _ in range(num_trials):
         # val_step_freq=125 silently did nothing — the cadence you set was not the
         # cadence you got. Both clocks are stopped, so this time is not counted as
         # training time.
+        # STOP_AFTER exits early WITHOUT altering train_steps. That distinction is
+        # the whole point: train_steps sets the LR schedule and is checked by the
+        # resume guard, so shortening it would change the trajectory being tested
+        # and be rejected as a sizing mismatch. This lets a resume from a
+        # long-run checkpoint be validated against the original run's own
+        # val_loss at an intermediate step, for minutes of GPU time instead of
+        # hours. Diagnostic only; a real run leaves it unset.
+        if stop_after and step >= stop_after:
+            print0(f"STOP_AFTER={stop_after} reached at step {step}; exiting early "
+                   f"(train_steps={train_steps} unchanged, schedule unaffected)",
+                   console=True)
+            break
+
         is_last = step == train_steps
         if is_last:
             # At loop entry `step` optimizer updates and loader batches have

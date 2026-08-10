@@ -5,10 +5,11 @@ literary LM (see [PLAN.md](PLAN.md) for why; you don't need to read it to review
 ~3,900 lines across 12 files. Corpus is built: 3,431 Gutenberg books → 3,178 in
 training → 462,267,303 tokens in 5 shards.
 
-**It has now run on a GPU** (Modal L4, ~20 short runs, ~1.6 GPU-hours). Launch
-path, shard integrity, resume, throughput and compile are all confirmed on real
-hardware — see CHANGELOG, 2026-08-06. **No full training run has happened yet**,
-but nothing is blocking one.
+**The baseline has now trained end to end**: 3,250 steps, val_loss 2.80559,
+3.07 h on Modal A100-SXM4 at ~156 k tok/s / ~37% MFU, curve smooth throughout.
+Resume is verified in the exact configuration used (torch 2.13, compile on,
+against a real long-run checkpoint): `val@1000` restored **exactly**, 125 resumed
+steps within 2e-5. Total spend to here ~4 GPU-hours including ~20 diagnostic runs.
 
 One finding shaped the current state: `torch.compile` on **torch 2.10.0** NaN'd
 the weights on the second optimizer update. Isolated by elimination (not fused

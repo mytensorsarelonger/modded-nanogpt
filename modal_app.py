@@ -656,6 +656,8 @@ def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
           val_tokens: int = 0, compile: bool = True, adamw_fused: bool = True,
           resume: str = "", resume_dir: str = "",
           checkpoint_every: int = 0, sample_every: int = 0, val_every: int = 0,
+          stop_after: int = 0,
+          muon_compile: bool = True, cache_bust: str = "", init_seed: int = 0,
           wandb: bool = WANDB_ENABLED, wandb_project: str = WANDB_PROJECT,
           git_sha: str = _GIT_SHA, git_dirty: bool = _GIT_DIRTY) -> dict:
     """The full baseline run. 3250 steps on an A100-40GB, ~3.2h, ~$9.
@@ -693,6 +695,11 @@ def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
         overrides["SAMPLE_EVERY"] = str(sample_every)
     if val_every:
         overrides["VAL_EVERY"] = str(val_every)
+    if stop_after:
+        # Deliberately NOT folded into train_steps: see STOP_AFTER in
+        # train_baseline.py. Leaves the LR schedule and the resume sizing guard
+        # untouched so a resumed trajectory stays comparable to the original.
+        overrides["STOP_AFTER"] = str(stop_after)
     return _run_training(overrides, gpu_tag=TRAIN_GPU, git_sha=git_sha,
                          git_dirty=git_dirty, resume=resume,
                          resume_dir=resume_dir)

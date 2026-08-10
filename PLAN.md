@@ -1,7 +1,11 @@
 # Project Plan — A Literary Model in the Weird & Eerie Register
 
-**Status:** Day 0. Blueprint chosen, architecture spec verified. No code written yet.
-**Last updated:** 2026-07-27
+**Status:** Milestones 0 and 1 complete. Baseline trained end to end — 3,250 steps,
+462 M-token corpus, val_loss 2.80559, 3.07 h on a rented A100. Prose is competent
+Victorian pastiche and **not yet eerie**; the samples say the register share (8.7%)
+and the missing general-text slice (0%) are the binding constraints. Next: the
+mixing dataloader, then Milestone 2 (`kda_mini.py`).
+**Last updated:** 2026-08-08 (see [CHANGELOG.md](CHANGELOG.md) for the run log)
 **Owner:** (you)
 
 ---
@@ -615,8 +619,8 @@ different axis.*
 
 | # | Milestone | Gate |
 |---|---|---|
-| 0 | Gutenberg tokens on disk in correct shard format, round-trip test passing, `manifest.jsonl` started | tonight — **laptop is sufficient** |
-| 1 | `train_gpt_simple.py` trains on own data on the 4090 (gloo + `mbs` patched); checkpointing, sampling, sample log all running | week 1–2 |
+| 0 | ~~Gutenberg tokens on disk, round-trip test, `manifest.jsonl`~~ **DONE** — 3,431 books → 3,178 trained → 462 M tokens | ✅ |
+| 1 | ~~baseline trains on own data; checkpointing, sampling, sample log running~~ **DONE 2026-08-08** — 3250 steps, val_loss 2.80559, 3.07 h on Modal A100. Ran on rented A100, not the 4090. | ✅ |
 | 2 | `kda_mini.py` passes sequential ↔ chunkwise ↔ `fla` at 1e-4 | week 2–3 |
 | 3 | **First K3-mini checkpoint**: ~120M active params, ~2B tokens, 3 readable paragraphs. It will be bad. It will be yours, architecture and data both. | **week 3** |
 | 4 | All swaps (a)–(h) benchmarked against control | week 4–6 |
@@ -626,8 +630,17 @@ different axis.*
 | 8 | Own tokenizer trained on final mix (64K → pad 65536) | after 6 |
 | 9 | Flagship run | on funding |
 
-**Explicitly do not yet:** rent GPUs, train the real tokenizer, build distributed
-training, or write the proposal. All of those get cheaper and better after Milestone 3.
+**Explicitly do not yet:** train the real tokenizer, build distributed training, or
+write the proposal. All of those get cheaper and better after Milestone 3.
+
+*Amended 2026-08-08:* "do not rent GPUs" is retired. It meant "don't rent before
+you have something to run"; Milestone 1 needed a GPU and the laptop was never one.
+Milestone 1 cost ~4 GPU-hours total including ~20 diagnostic L4 runs.
+
+*Also amended:* Milestone 1's samples showed the **register share (8.7%) and the
+missing general-text slice (0%) are the binding constraints, not model size.** The
+mixing dataloader that Phase 1's A/B/C ablation depends on is still unbuilt, which
+makes it the highest-value next build — ahead of `kda_mini.py`.
 
 ---
 

@@ -10,6 +10,90 @@ from the code alone.
 
 ---
 
+## 2026-08-08 — Milestone 1 complete: baseline trained end to end
+
+First real training run. **3,250 steps, 462 M-token corpus, final val_loss
+2.80559, 3.07 h on A100-SXM4** at ~156 k tok/s / ~37% MFU. Curve smooth
+throughout, no instability. W&B:
+`wandb.ai/stemuli-studios/k3mini/runs/21c92807-418e-49ce-a78b-566b376f0914`.
+
+Milestone 1's gate was "a dense baseline loss curve and a sample log, on your
+data, that you trust." Both exist.
+
+### Verified
+
+- **Resume works in the configuration that will actually be used** — torch 2.13,
+  compile on, resuming a real long-run checkpoint. `val@1000` restored
+  **exactly** (3.32969 → 3.32969); 125 resumed steps landed within 2e-5 of the
+  original trajectory (~1.6e-7/step, consistent with GPU reduction noise).
+  `STOP_AFTER` made this an 11-minute test instead of a 2-hour one by exiting
+  early without touching `train_steps`, so the LR schedule stayed intact.
+
+### Added
+
+- `STOP_AFTER` — exit at a given step while leaving `train_steps` (and therefore
+  the LR schedule and the resume guard's sizing check) unchanged. Exists because
+  verifying a resume from a 3250-step checkpoint otherwise costs a full run.
+
+### Read the samples — the finding that matters
+
+The probe suite (§7.1) earned its keep on first real use. On the `mundane`
+family at T=0.7, across the run:
+
+| step | output |
+|---|---|
+| 250 | footnote debris (`[Footnote 768: _Lord Ellenborough._]`) |
+| 1000 | contentless dialogue loop (`"is a sort of a sort of a room"`) |
+| 2000 | **best of the run** — actually about kitchens, grammatical |
+| 3250 | total collapse: `cooks and cooks and cooks…` for the whole sample |
+
+**Loss improved 3.33 → 2.81 across that window while this sample got much
+worse.** Loss cannot see this; only reading can. That is the entire argument for
+§7.1 existing, demonstrated.
+
+Diagnosis, from the two-temperature design: at **T=1.0 step 3250 does not loop**,
+and `cold_open` at T=0.7 does not loop either. So it is not model collapse — the
+*mundane prompt specifically* is off-distribution. The corpus is ~all narrative
+fiction, so asked for exposition the model has no expository mode, drops to the
+lowest-entropy continuation, and with no top-k/top-p never escapes the cycle.
+
+**The defect is not "register as costume" — it is "no register for non-narrative
+prose at all."** The general-modern-text slice in §5.1 is currently **0%** of the
+corpus, and §5.1 calls it "not optional… what keeps the model steerable rather
+than a beautiful ghost." This probe priced that omission. The `instruction`
+family corroborates: asked to "Describe a staircase in three sentences," it
+produced pseudo-philology about "the number of the fantastic syllables."
+
+**Is it eerie? No.** Competent late-Victorian pastiche, grammatical, incoherent
+past a sentence or two. The register did not take at 8.7%. The one moment with
+real cadence is `continuation` at T=1.0 — "he pocketed his revolver, placed his
+hand on the lock, and felt for the secret lock which contained a key long since
+found" — and that is the easiest case, since it was handed an eerie paragraph to
+imitate. At 124 M params / 8.7% register / 3.7 epochs this is the expected
+result; §8 predicted "it will be bad, it will be yours."
+
+### Consequences for the plan
+
+1. **Register share is the binding constraint, not model size.** 8.7% is below
+   §5.1's 10–25% band and the mixing dataloader is still unbuilt. It is now the
+   highest-value unbuilt thing, because it is the variable Phase 1's A/B/C
+   ablation turns on.
+2. **The general-text slice must exist.** 0% is why `mundane` and `instruction`
+   fail.
+3. **Probe suite needs top-p, or T=1.0 as the reading of record.** Pure
+   multinomial on a sharpened post-cooldown model loops on OOD prompts. Keep
+   T=0.7 as a degeneracy detector — which is what it just was.
+
+### Corrected
+
+- I claimed mid-session that "W&B was never enabled for the full run." Wrong —
+  the full run logged normally. The evidence was the *resume* run's overrides,
+  which lacked `WANDB=1` because I launched that one myself.
+- `index.jsonl` records no W&B URL on any of 19 runs, so the registry and the
+  curve are not linked. §4.0.1 wants one record pointing at everything.
+
+---
+
 ## 2026-08-06 (later) — compile blocker resolved by torch 2.13.0
 
 - **Bumped the Modal image from `torch==2.10.0` to `torch==2.13.0`** (cu130).
