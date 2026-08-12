@@ -41,7 +41,8 @@ bug, not an improvement.
    `start_batch` fast-forward must stay in exact lockstep with the live loop's
    position arithmetic. If they diverge, a resumed run reads different data with no
    error. The shared recurrence and resume metadata invariants now have focused
-   tests; full-scale training remains unrun.
+   tests, and a full 3,250-step run plus a resume from its step-1000 checkpoint
+   have now both completed on A100 (`val@1000` restored exactly).
 3. **Setup block in `train_baseline.py`** (~lines 300–340) and `save/load_checkpoint`.
    These CUDA branches have now executed on L4 without error. The earlier self-recursive
    `device_name()` defect is fixed and guarded by the Modal preflight; still
@@ -52,8 +53,9 @@ bug, not an improvement.
    constrained to the runs Volume, and git provenance is forwarded to the
    trainer. The remaining
    nested data Volume mount, Gloo-on-CUDA with `device_id=`, and the shard
-   round-trip are all now confirmed working against the real service. The open
-   item is the compile NaN above, not the launcher.
+   round-trip are all confirmed working against the real service, and a 3-hour
+   detached run survived the local process dying. The compile NaN is resolved
+   (torch 2.13.0). No known open item here.
 5. **`data/quality_filter.py` thresholds.** Empirically tuned by inspecting a
    200-book sample, then applied to 3,431 books; the borderline cases still need
    a human policy pass at the new scale. It drops 177 documents after dedup. Check
@@ -79,7 +81,7 @@ python -c "import modal_app; print('modal_app preflight OK')"
 modal run modal_app.py::train --help             # confirms resume/provenance CLI
 ```
 
-Colab L4 gate (the no-Modal alternative):
+Colab L4 gate — **secondary**; Modal is the primary path now (MODAL.md):
 
 ```bash
 python data/prepare_colab_smoke.py --copy --zip
@@ -95,8 +97,19 @@ Resume equivalence (the claim most worth re-checking, ~8 min):
 SMOKE=1 TRAIN_STEPS=6 CHECKPOINT_EVERY=3 SAMPLE_EVERY=99 BATCH_SIZE=8192 MBS=1 VAL_TOKENS=8192 python train_baseline.py
 ```
 
-then rerun with `RESUME=runs/<id>/ckpt_00003.pt`. Both must reach
-`val_loss 7.42766` and produce byte-identical `samples.log`.
+then rerun with `RESUME=runs/<id>/ckpt_00003.pt`. **Check the invariant, not a
+number:** the resumed run must reach the *same* `val_loss` the uninterrupted run
+reported at the same step, and `final_loader_state` in `runs/index.jsonl` must
+match exactly. (An earlier version of this file named a specific expected loss.
+That was wrong twice over — it drifts with any sizing change, and it was recorded
+while init was unseeded, so it was never reproducible in the first place.)
+
+Cloud equivalent, ~11 min on L4, using `STOP_AFTER` so a 3250-step checkpoint can
+be resume-tested without paying for a full run:
+
+```bash
+modal run modal_app.py::train --resume "<run_id>/ckpt_01000.pt" --stop-after 1125
+```
 
 Cloud recovery uses paths relative to the `k3mini-runs` Volume:
 
@@ -117,7 +130,21 @@ Sampling has no KV cache (O(n²) generation) — known, and deliberate for now.
 
 ## Most useful thing you could tell me
 
-Whether the dedup and resume implementations are correct, and whether anything in
-the CUDA-only paths will fail on first contact with an A100. Those are the two
-places where a bug costs real money or silently corrupts a result, and they are
-exactly the two places local testing could not reach.
+The original two questions are now answered: resume is verified against a real
+long-run checkpoint, and the CUDA paths have survived a 3-hour A100 run. What
+remains, in order:
+
+1. **Is `data/dedup.py` correct?** Still the highest risk per line, still
+   unverified by anything except its own output. A silent failure here is
+   invisible in every downstream artifact.
+2. **Does the quality filter's threshold set still make sense at 3,431 books?**
+   It was tuned by eye on 200 and now drops 177 documents. That needs a human
+   policy judgement, not a code review.
+3. **Is the register/backbone slice boundary defensible?** Author-level tagging
+   puts all ~52 E. F. Benson books in `register`, most of which are social
+   comedies rather than ghost stories. `slice_overrides.json` exists for exactly
+   this and is empty.
+
+Note (2) and (3) are editorial, not engineering. They are the calls I have been
+making by proxy from §5.2.3's author list, and they set the corpus composition
+that Phase 1's whole experiment varies.

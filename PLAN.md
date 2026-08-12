@@ -672,7 +672,10 @@ makes it the highest-value next build — ahead of `kda_mini.py`.
 - **Context length ambition.** 4K/8K is sufficient, and 8K matches K3's actual pretrain
   floor. But KDA + NoPE makes long-context extension unusually cheap, and "a model that
   holds a whole novel in mind" is thematically apt. Hold in reserve.
-- **Windows vs WSL2 vs Linux on the 4090 box.** Blocking for Milestone 1. WSL2 is the
+- ~~**Windows vs WSL2 vs Linux on the 4090 box.**~~ **RESOLVED 2026-08-08** — moot.
+  Training happens on rented Modal A100s; the 4090 was never used and the laptop
+  never could be. Nothing runs locally. Original note retained below for context:
+  WSL2 was the
   recommendation: it gets NCCL, Triton and inductor working without per-tool workarounds.
 
 ---

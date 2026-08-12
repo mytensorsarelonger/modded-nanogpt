@@ -1,3 +1,51 @@
+<!-- K3-MINI FORK BANNER — do not delete; upstream README follows below -->
+# K3-mini (this fork)
+
+**This is not the NanoGPT speedrun repo any more.** It is a fork hosting *K3-mini* —
+a from-scratch literary language model in the weird & eerie register. The upstream
+speedrun README is preserved below, unchanged, because
+`records/track_3_optimization/train_gpt_simple.py` is our **control arm** and its
+provenance matters.
+
+### Start here
+
+| read | for |
+|---|---|
+| [PLAN.md](PLAN.md) | goals, architecture spec, data plan, milestones. The source of intent. |
+| [CHANGELOG.md](CHANGELOG.md) | what happened, when, and *why* — including bugs worth not repeating |
+| [HANDOFF.md](HANDOFF.md) | code-review orientation and risk ranking |
+| [MODAL.md](MODAL.md) | how to run anything on a GPU |
+
+### Status (2026-08-08)
+
+Milestones 0–1 of 10 done. Corpus built (3,178 books, 462 M tokens) and the
+baseline has trained end to end: 3,250 steps, val_loss 2.80559, 3.07 h on a
+rented A100. **None of K3-mini itself exists yet** — no KDA, MoE, AttnRes or
+SiTU-GLU. `train_baseline.py` is a deliberately untuned dense control.
+
+### Two rules that will save you a day
+
+1. **Run nothing locally.** The dev box is Windows; every local execution path
+   here has cost real time (cp1252 crashes ×3, MSYS2 path mangling misrouting
+   890 MB, a platform-split torch pin). This machine edits files and invokes
+   `modal run`. See CHANGELOG *2026-08-06 → Lesson*.
+2. **`train_baseline.py` is a control arm.** Improving the model there is a
+   *defect*, not a contribution. See HANDOFF.md.
+
+### The binding constraint right now
+
+Not model size — **data mix**. The register slice is 8.7% (target 10–25%) and the
+general-modern-text slice is **0%**, which is why the model has no expository
+mode and loops on non-narrative prompts. The **mixing dataloader is unbuilt**, and
+it is the variable Phase 1's A/B/C ablation turns on, so it outranks
+`kda_mini.py` as the next thing to build.
+
+*Note: workspace-root `AGENTS.md` is Prime Lab / verifiers guidance for RL
+environment work. It does not apply to this repo — do not try to fit this project
+to those conventions.*
+
+---
+
 # Modded-NanoGPT
 
 This repository hosts the *NanoGPT speedrun*, in which we (collaboratively|competitively) search for the fastest algorithm to use 8 NVIDIA H100 GPUs to train a language model that attains 3.28 cross-entropy loss on the [FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) validation set.

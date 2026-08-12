@@ -368,6 +368,42 @@ Claims checked by test rather than assertion:
 
 ### Known gaps
 
+*Refreshed 2026-08-08 — post-Milestone-1 state.*
+
+**Blocking Phase 1:**
+- **Mixing dataloader unbuilt.** Slices are tagged and measured but cannot be
+  reweighted, so the ratio Phase 1's A/B/C ablation varies is not yet a knob.
+  Highest-value unbuilt thing in the repo.
+- **General-modern-text slice is 0%.** §5.1 budgets 10–20% and calls it "not
+  optional." Milestone 1's samples showed exactly what its absence costs: no
+  expository mode, repetition collapse on non-narrative prompts.
+- **Register slice is 8.7%**, below §5.1's 10–25% band.
+
+**Architecture — none of K3-mini exists yet:** no `kda_mini.py`, no LatentMoE,
+no Quantile Balancing, no AttnRes, no SiTU-GLU, no MTP head. Phase 0.5 has not
+started. The architectural thesis in §1 is entirely untested.
+
+**Instrumentation:**
+- Probe suite has no top-k/top-p, so a sharpened post-cooldown model loops on OOD
+  prompts at T=0.7. Keep it as a degeneracy detector; read T=1.0 for prose.
+- `index.jsonl` records no W&B URL, so registry and curve are not linked.
+- Resume guard treats checkpoint/sample *cadence* as run identity, so you cannot
+  resume while changing how often it saves. Unfixed on purpose — which fields
+  constitute identity is a judgement call.
+- Sampling has no KV cache (O(n²)).
+
+**Data provenance:**
+- `pub_year` is null for all 3,431 documents; Gutendex cannot supply it, so §6's
+  per-work ≤1930 check cannot be automated. Matters for the hand-curated slice.
+- `slice_overrides.json` empty → E. F. Benson's social comedies tagged register.
+- ~933 MB of misrouted duplicate shards still sit under `C:/Program Files/Git/`
+  in the `k3mini-shards` Volume (MSYS2 path bug). Harmless, untidy.
+  Clean with: `modal volume rm -r k3mini-shards "C:"`
+- No tier-2 model-based quality classifier (§5.5.2 tier 1 only).
+
+**Original list follows.**
+
+
 Deliberately unbuilt, in rough priority order:
 
 1. **No GPU run has happened.** Everything is verified on CPU at ≤6 steps. All
