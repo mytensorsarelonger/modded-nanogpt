@@ -10,6 +10,45 @@ from the code alone.
 
 ---
 
+## 2026-08-08 (later) — training-dynamics changes from arXiv 2606.06533
+
+Read Biderman, Khan, Mireshghallah, Arnett, Barez & Saphra, *"Position: Don't Just
+'Fix it in Post': A Science of AI Must Study Training Dynamics"* (ICML 2026). A
+**position paper, not a method paper** — it supplies framing and citations, no
+algorithms. Three things taken from it:
+
+- **Seed-band gate before any Phase 0.5 swap is believed** (PLAN §4.1). Every swap
+  produces a val_loss delta; a delta smaller than run-to-run seed variance is a
+  draw, not a result. We know the band is nonzero — 0.0148 between two identical
+  6-step runs before `init_seed` existed — and unmeasured at 3250 steps. Their §2.3
+  argues treating seed variation as noise-to-average-over is a choice that must be
+  made deliberately, and that variation near thresholds produces distinct
+  generalization clusters in different loss basins. Filed for discussion on PR #1
+  (repo has issues disabled).
+- **The mixing dataloader must take a schedule, not a static ratio** (new PLAN
+  §5.1.1). Later data has larger influence on final behaviour, which is the
+  mechanism behind §4.3's cooldown upweighting. "15% register" and "8% rising to
+  25% through cooldown" are different interventions and a ratio-only loader cannot
+  express the second. **This also surfaced that §4.2's A/B/C mix ablation is
+  under-specified**: "60/40" does not say whether the ratio is constant or
+  scheduled, so as written runs A/B/C would not be comparable to each other.
+- **`checkpoint_every` 1000 → 250**, matching `sample_every`. Biderman et al. 2023a
+  found intermediate checkpoints of one run predict final memorization *better than
+  smaller fully-trained models do*. That partially undercuts the small-proxy-run
+  logic Phase 1 leans on, and dense checkpoints are the precondition for any
+  retrospective dynamics work. 13 × ~1.4 GB per run is trivial on a Volume.
+
+The paper also supplies the citation for Milestone 1's own finding: models "can
+only systematically compose concepts which appear in diverse contexts during
+training" (Allen-Zhu & Li 2025; Okawa 2023; Chang 2025). Our 0% general-text slice
+leaving no expository mode was predicted, not novel.
+
+*For method, follow its citations rather than the paper:* Pythia (Biderman 2023),
+Tigges 2024 (circuit consistency across checkpoints), Li 2025 (hundreds of small
+models).
+
+---
+
 ## 2026-08-08 — Milestone 1 complete: baseline trained end to end
 
 First real training run. **3,250 steps, 462 M-token corpus, final val_loss

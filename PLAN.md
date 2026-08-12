@@ -10,7 +10,13 @@ mixing dataloader, then Milestone 2 (`kda_mini.py`).
 
 ---
 
-### Changes in this revision
+### Changes in the 2026-07-27 revision (historical)
+
+> **This list is the original 2026-07-27 revision summary and is NOT a running
+> record.** Everything since — Milestone 0/1 completion, the torch 2.13 bump, the
+> seed-band gate, §5.1.1, and the resolved open decisions — is in
+> [CHANGELOG.md](CHANGELOG.md), which is the authoritative history. Do not maintain
+> two changelogs.
 
 1. **§3.1 is now verified line-by-line against the primary K3 report** (`k3_tech_report.pdf`,
    25pp, on disk). Every constant survived: `g_min = −5`, β₁ = 4, β₂ = 25, `N_s = 2`,
