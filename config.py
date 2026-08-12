@@ -82,8 +82,11 @@ class Config:
     # which is not a trajectory. The prompts, temperatures and length live in
     # probes.py; only the cadence and the seed are tuning knobs.
     sample_every: int = 250
-    # Checkpoints are ~1 GB each, so they get a sparser cadence than samples.
-    checkpoint_every: int = 1000
+    # Matched to sample_every, not sparser. ~1.4 GB x 13 per run is trivial on a
+    # Volume, and the trajectory is research data: Biderman et al. 2023a found
+    # intermediate checkpoints of one run predict final memorization better than
+    # smaller fully-trained models do. See PLAN.md §4.0.1.
+    checkpoint_every: int = 250
     # Seeds parameter initialisation. Fixed so two runs of the same config are
     # comparable: unseeded, two identical 6-step runs measured 0.0148 apart in
     # val_loss, which would sit as a noise floor under every Phase 0.5 ablation.
