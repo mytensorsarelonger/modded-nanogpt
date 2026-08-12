@@ -38,4 +38,4 @@ train_baseline_smoke.py
 # data/shards/manifest.json  data recipe: tokenizer, vocab, filter thresholds
 
 # Modal artifacts fetched locally
-modal_out/
+modal_out*/

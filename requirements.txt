@@ -1,10 +1,9 @@
 numpy
 tqdm
-# PyTorch 2.10's Windows wheel exposes Gloo but cannot construct a usable
-# transport ("unsupported gloo device").  The Linux/Modal control stays pinned
-# to 2.10; local Windows smoke tests use the first verified fixed wheel.
-torch==2.13.0; sys_platform == "win32"
-torch==2.10.0; sys_platform != "win32"
+# PyTorch 2.10 is not a valid control runtime: its compiled graph produced
+# non-finite weights on the second update. 2.13 is verified on Linux/CUDA and
+# also fixes the unusable Windows Gloo transport.
+torch==2.13.0
 huggingface-hub
 kernels
 setuptools

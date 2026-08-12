@@ -7,8 +7,10 @@ from pathlib import Path
 from config import config_hash
 from training_state import (
     checkpoint_sidecar_path,
+    completion_metadata,
     copy_sample_log_through_step,
     distributed_batch_granule,
+    effective_training_overrides,
     latest_checkpoint,
     validate_loader_step,
     validate_resume_metadata,
@@ -140,6 +142,72 @@ class ResumeMetadataTests(unittest.TestCase):
             config_hash({"torch_version": "2.10.0"}),
             config_hash({"torch_version": "2.13.0"}),
         )
+
+    def test_runtime_identity_includes_launcher_controls(self):
+        values = effective_training_overrides(
+            batch_size=524288,
+            mbs=8,
+            seq_len=1024,
+            train_steps=3250,
+            val_tokens=4333568,
+            sample_every=250,
+            checkpoint_every=250,
+            val_every=125,
+            compile_model=True,
+            adamw_fused=False,
+            muon_compile=False,
+            init_seed=7,
+            world_size=1,
+            torch_version="2.13.0+cu130",
+            torch_cuda_version="13.0",
+        )
+        self.assertEqual(values["init_seed"], 7)
+        self.assertIs(values["adamw_fused"], False)
+        self.assertIs(values["muon_compile"], False)
+        self.assertEqual(values["val_every"], 125)
+        self.assertNotEqual(
+            config_hash(values), config_hash({**values, "init_seed": 8})
+        )
+
+
+class CompletionMetadataTests(unittest.TestCase):
+    def test_stop_after_records_actual_progress(self):
+        result = completion_metadata(
+            completed_step=1125,
+            train_steps=3250,
+            batch_size=524288,
+            train_tokens_available=462267303,
+            final_val_loss=3.1,
+            final_val_step=1125,
+        )
+        self.assertEqual(result["steps_completed"], 1125)
+        self.assertTrue(result["stopped_early"])
+        self.assertEqual(result["final_val_step"], 1125)
+        self.assertEqual(result["epochs_over_corpus"], 1.28)
+
+    def test_nonfinite_loss_is_strict_json_safe(self):
+        result = completion_metadata(
+            completed_step=3,
+            train_steps=3,
+            batch_size=8192,
+            train_tokens_available=100000,
+            final_val_loss=float("nan"),
+            final_val_step=3,
+        )
+        self.assertIsNone(result["final_val_loss"])
+        self.assertTrue(result["final_val_loss_nonfinite"])
+        self.assertFalse(result["stopped_early"])
+
+    def test_rejects_impossible_completion_step(self):
+        with self.assertRaisesRegex(ValueError, "completed_step"):
+            completion_metadata(
+                completed_step=7,
+                train_steps=6,
+                batch_size=8192,
+                train_tokens_available=100000,
+                final_val_loss=None,
+                final_val_step=None,
+            )
 
 
 class SampleTrajectoryTests(unittest.TestCase):

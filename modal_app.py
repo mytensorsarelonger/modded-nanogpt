@@ -105,7 +105,10 @@ BIG_GPU = "H100"          # Often *cheaper in total* than A100 — see MODAL.md.
 # Modal's default function timeout is 5 minutes, which is absurdly short for a
 # 3-hour training run, so every timeout below is explicit. 6h leaves ~2x
 # headroom over the ~3.2h central estimate for a 3250-step A100 run.
-SMOKE_TIMEOUT = 30 * 60
+# The corrected full-batch, cold-cache L4 gate measured 27.5 minutes. Forty-five
+# minutes leaves useful variance headroom without turning a hung smoke into an
+# unbounded paid job.
+SMOKE_TIMEOUT = 45 * 60
 TRAIN_TIMEOUT = 6 * 60 * 60
 BIG_TIMEOUT = 4 * 60 * 60
 
@@ -118,10 +121,10 @@ _COMMON_CHECKPOINT = re.compile(r"ckpt_\d+\.pt\Z")
 #
 # Version pinning rationale:
 #
-#  torch==2.10.0   Matches requirements.txt's Linux pin exactly. Windows uses
-#                  2.13.0 because the 2.10 Windows Gloo wheel cannot construct
-#                  a usable transport; that local-only pin does not affect this
-#                  Linux image. torch is
+#  torch==2.13.0   Matches requirements.txt and is the first verified runtime
+#                  for both compiled CUDA training and Windows Gloo. Torch 2.10
+#                  produced non-finite weights on the second compiled update.
+#                  torch is
 #                  the one dependency where an unpinned float is genuinely
 #                  dangerous: inductor codegen, `F.rms_norm`, the `device_id=`
 #                  kwarg to init_process_group, and fused AdamW's dtype-group
@@ -601,9 +604,9 @@ def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
     SMOKE, which is right for a ten-step CPU check and wrong here — inductor
     cold-start is one of the main things a pre-flight smoke exists to de-risk.
 
-    SMOKE=1 also shrinks BATCH_SIZE to 64 Ki tokens/step and VAL_TOKENS to a
-    slice, so this is a plumbing test, not a loss measurement. Do not read the
-    val numbers as signal.
+    The launcher restores the real 524,288-token batch so the control learning
+    rates keep their intended LR-to-batch relationship; SMOKE still limits the
+    validation slice. This is a plumbing test, not a loss measurement.
     """
     return _run_training(
         {

@@ -6,6 +6,7 @@ rules can be tested without importing (and therefore launching) the trainer.
 
 from __future__ import annotations
 
+import math
 import re
 from pathlib import Path
 
@@ -15,6 +16,83 @@ _SAMPLE_HEADER = re.compile(
     r"(?m)^={72}\r?\nStep\s+(\d+)[^\r\n]*\r?\n={72}\r?\n"
 )
 IDENTITY_KEYS = ("config_hash", "data_manifest_hash", "shard_manifest_hash")
+
+
+def effective_training_overrides(
+    *,
+    batch_size: int,
+    mbs: int,
+    seq_len: int,
+    train_steps: int,
+    val_tokens: int,
+    sample_every: int,
+    checkpoint_every: int,
+    val_every: int,
+    compile_model: bool,
+    adamw_fused: bool,
+    muon_compile: bool,
+    init_seed: int,
+    world_size: int,
+    torch_version: str,
+    torch_cuda_version: str | None,
+) -> dict:
+    """Return every effective runtime value that identifies a trajectory.
+
+    Launcher flags belong here even when their default also lives in config.py:
+    an environment override must replace the default in the config hash rather
+    than silently producing a different run under the same identity.
+    """
+    return {
+        "batch_size": batch_size,
+        "mbs": mbs,
+        "seq_len": seq_len,
+        "train_steps": train_steps,
+        "val_tokens": val_tokens,
+        "sample_every": sample_every,
+        "checkpoint_every": checkpoint_every,
+        "val_every": val_every,
+        "compile": compile_model,
+        "adamw_fused": adamw_fused,
+        "muon_compile": muon_compile,
+        "init_seed": init_seed,
+        "world_size": world_size,
+        "torch_version": torch_version,
+        "torch_cuda_version": torch_cuda_version,
+    }
+
+
+def completion_metadata(
+    *,
+    completed_step: int,
+    train_steps: int,
+    batch_size: int,
+    train_tokens_available: int,
+    final_val_loss: float | None,
+    final_val_step: int | None,
+) -> dict:
+    """Build a truthful, strict-JSON-safe outcome record for a run."""
+    if not 0 <= completed_step <= train_steps:
+        raise ValueError(
+            f"completed_step must be in [0, {train_steps}], got {completed_step}"
+        )
+    if batch_size <= 0 or train_tokens_available <= 0:
+        raise ValueError("batch_size and train_tokens_available must be positive")
+
+    loss = None if final_val_loss is None else float(final_val_loss)
+    loss_nonfinite = loss is not None and not math.isfinite(loss)
+    if loss_nonfinite:
+        loss = None
+
+    return {
+        "final_val_loss": loss,
+        "final_val_loss_nonfinite": loss_nonfinite,
+        "final_val_step": final_val_step,
+        "steps_completed": completed_step,
+        "stopped_early": completed_step < train_steps,
+        "epochs_over_corpus": round(
+            completed_step * batch_size / train_tokens_available, 2
+        ),
+    }
 
 
 def distributed_batch_granule(seq_len: int, mbs: int, world_size: int) -> int:

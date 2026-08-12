@@ -32,8 +32,10 @@ from config import config, config_hash, manifest_hash, validate_against_shards
 import probes
 from training_state import (
     checkpoint_sidecar_path,
+    completion_metadata,
     copy_sample_log_through_step,
     distributed_batch_granule,
+    effective_training_overrides,
     latest_checkpoint,
     validate_loader_step,
     validate_resume_metadata,
@@ -268,7 +270,10 @@ def zeropower_via_newtonschulz5(G: Tensor) -> Tensor:
 # function mutates `grad` in place via grad.lerp_ and runs Newton-Schulz in bf16,
 # which makes it the prime suspect. Compiling the model is worth ~3.4x, so
 # excluding only this is far better than COMPILE=0 if it is sufficient.
-@(torch.compile if os.environ.get("MUON_COMPILE", "1") == "1" else (lambda f: f))
+MUON_COMPILE = os.environ.get("MUON_COMPILE", "1") == "1"
+
+
+@(torch.compile if MUON_COMPILE else (lambda f: f))
 def muon_update(grad, momentum, mu=0.95, nesterov=True):
     momentum.lerp_(grad, 1 - mu)
     update = grad.lerp_(momentum, mu) if nesterov else momentum
@@ -440,6 +445,7 @@ for _ in range(num_trials):
     stop_after = int(os.environ.get("STOP_AFTER", 0))
     sample_every = int(os.environ.get("SAMPLE_EVERY", config.sample_every))
     checkpoint_every = int(os.environ.get("CHECKPOINT_EVERY", config.checkpoint_every))
+    adamw_fused = os.environ.get("ADAMW_FUSED", "1") == "1"
 
     # initialize model parameters
     for name, p in model.named_parameters():
@@ -465,7 +471,7 @@ for _ in range(num_trials):
                         dict(params=[p for p in model.parameters() if p.ndim < 2],
                              lr=config.adamw_lr_scalars)],
                        betas=config.adamw_betas, eps=config.adamw_eps,
-                       weight_decay=config.adamw_wd, fused=(os.environ.get("ADAMW_FUSED", "1") == "1"))
+                       weight_decay=config.adamw_wd, fused=adamw_fused)
     optimizer2 = Muon([p for p in model.blocks.parameters() if p.ndim >= 2],
                       lr=config.muon_lr, weight_decay=config.muon_wd)
     optimizers = [optimizer1, optimizer2]
@@ -516,21 +522,25 @@ for _ in range(num_trials):
     # collide on the same config_hash, which is the one thing the hash exists to
     # prevent. Same for the manifest — hash the file, not a summary of it.
     base_cfg_hash = config_hash()[:16]
-    effective_overrides = {
-        "batch_size": batch_size,
-        "mbs": mbs,
-        "seq_len": seq_len,
-        "train_steps": train_steps,
-        "val_tokens": val_tokens,
-        "sample_every": sample_every,
-        "checkpoint_every": checkpoint_every,
-        "compile": COMPILE,
-        "world_size": dist.get_world_size(),
+    effective_overrides = effective_training_overrides(
+        batch_size=batch_size,
+        mbs=mbs,
+        seq_len=seq_len,
+        train_steps=train_steps,
+        val_tokens=val_tokens,
+        sample_every=sample_every,
+        checkpoint_every=checkpoint_every,
+        val_every=val_every,
+        compile_model=COMPILE,
+        adamw_fused=adamw_fused,
+        muon_compile=MUON_COMPILE,
+        init_seed=_init_seed,
+        world_size=dist.get_world_size(),
         # A checkpoint resumed under a different framework/CUDA build is not a
         # bit-exact continuation even when every model hyperparameter matches.
-        "torch_version": torch.__version__,
-        "torch_cuda_version": torch.version.cuda,
-    }
+        torch_version=torch.__version__,
+        torch_cuda_version=torch.version.cuda,
+    )
     cfg_hash = config_hash(effective_overrides)[:16]
     data_hash = (manifest_hash() or "unknown")[:16]
     # The shard manifest pins tokenizer, vocab, eot, val-split method AND the
@@ -556,11 +566,15 @@ for _ in range(num_trials):
         "val_tokens": val_tokens,
         "train_steps": train_steps,
         "train_tokens_available": _shard_meta["total_train_tokens"],
-        "epochs_over_corpus": round(
+        "planned_epochs_over_corpus": round(
             train_steps * batch_size / max(_shard_meta["total_train_tokens"], 1), 2),
         "hardware": device_name(),
         "world_size": dist.get_world_size(),
         "compile": COMPILE,
+        "adamw_fused": adamw_fused,
+        "muon_compile": MUON_COMPILE,
+        "init_seed": _init_seed,
+        "val_every": val_every,
         "torch_version": torch.__version__,
         "torch_cuda_version": torch.version.cuda,
     }
@@ -568,7 +582,7 @@ for _ in range(num_trials):
     print0(f"Config hash:        {cfg_hash}")
     print0(f"Data manifest hash: {data_hash}")
     print0(f"Shard recipe hash:  {shard_hash}")
-    print0(f"Epochs over corpus: {run_entry['epochs_over_corpus']}")
+    print0(f"Planned epochs over corpus: {run_entry['planned_epochs_over_corpus']}")
 
     # --- Optional W&B (a view; runs/index.jsonl stays the source of truth) ----
     # Enabled by WANDB=1. Deliberately soft: an unavailable or misconfigured
@@ -875,6 +889,9 @@ for _ in range(num_trials):
     # start the clock
     training_time = 0
     last_val_step = start_step
+    final_val_loss = None
+    final_val_step = None
+    completed_step = start_step
     # Device-side accumulators: adding a detached scalar is a trivial GPU op with
     # no host sync, unlike .item() every step.
     train_loss_accum = torch.zeros((), device=device)
@@ -908,6 +925,8 @@ for _ in range(num_trials):
                     val_loss += model(val_inputs[i*mbs:(i+1)*mbs], val_targets[i*mbs:(i+1)*mbs])
             dist.all_reduce(val_loss, op=dist.ReduceOp.SUM)
             val_loss /= val_tokens
+            final_val_loss = float(val_loss)
+            final_val_step = step
             _tl = (float(train_loss_accum / train_tokens_seen)
                    if train_tokens_seen > 0 else float("nan"))
             print0(f"step:{step}/{train_steps} val_loss:{val_loss:.5f} "
@@ -945,6 +964,12 @@ for _ in range(num_trials):
         # val_loss at an intermediate step, for minutes of GPU time instead of
         # hours. Diagnostic only; a real run leaves it unset.
         if stop_after and step >= stop_after:
+            # If STOP_AFTER is not itself a validation step, include the training
+            # time since the last validation without pretending the older loss
+            # was measured at this step.
+            if step > last_val_step:
+                dist.barrier()
+                training_time += time.perf_counter() - t0
             print0(f"STOP_AFTER={stop_after} reached at step {step}; exiting early "
                    f"(train_steps={train_steps} unchanged, schedule unaffected)",
                    console=True)
@@ -1002,6 +1027,7 @@ for _ in range(num_trials):
         for opt in optimizers:
             opt.step()
         model.zero_grad(set_to_none=True)
+        completed_step = step + 1
         approx_training_time = training_time + (time.perf_counter() - t0)
         print0(f"step:{step+1}/{train_steps} train_time:{approx_training_time:.3f}s"
                + f" step_avg:{1000*approx_training_time/(step + 1):.2f}ms", console=True, log=False)
@@ -1013,9 +1039,16 @@ _rank = dist.get_rank()
 if _rank == 0:
     # A registry entry without the outcome is only half of PLAN.md §4.0.1: the
     # point is to look up which config produced which curve.
-    run_entry["final_val_loss"] = float(val_loss) if "val_loss" in dir() else None
+    run_entry.update(completion_metadata(
+        completed_step=completed_step,
+        train_steps=train_steps,
+        batch_size=batch_size,
+        train_tokens_available=_shard_meta["total_train_tokens"],
+        final_val_loss=final_val_loss,
+        final_val_step=final_val_step,
+    ))
     run_entry["train_time_s"] = round(training_time, 2)
-    run_entry["steps_completed"] = train_steps
+    run_entry["stop_after_requested"] = stop_after or None
     run_entry["sample_log"] = str(sample_log_path)
     # The direct test of resume correctness: an interrupted run and an
     # uninterrupted one must finish at the SAME corpus position. Loss agreement
@@ -1025,7 +1058,7 @@ if _rank == 0:
     run_entry["logfile"] = logfile
     index_path = runs_dir / "index.jsonl"
     with open(index_path, "a", encoding="utf-8") as f:
-        f.write(json.dumps(run_entry) + "\n")
+        f.write(json.dumps(run_entry, allow_nan=False) + "\n")
     print0(f"Run index updated at {index_path}", console=True)
     # Mirror the outcome into the W&B summary so the two records agree, then close
     # the run. Finishing before destroy_process_group keeps print0 usable.

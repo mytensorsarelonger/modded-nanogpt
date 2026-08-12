@@ -10,6 +10,36 @@ from the code alone.
 
 ---
 
+## 2026-08-12 — PR #1 merge-blocker repair
+
+- **Unified the executable runtime on PyTorch 2.13.0.** The Linux requirements,
+  Modal image, Colab notebook, and operator documentation now agree. The Colab
+  gate also uses the control arm's real 524,288-token batch instead of the
+  65,536-token diagnostic setting that diverged under the fixed learning rates.
+- **Made runtime identity complete.** `INIT_SEED`, `ADAMW_FUSED`,
+  `MUON_COMPILE`, `VAL_EVERY`, and the already-resolved sizing/framework values
+  all participate in `config_hash` and are recorded in the run registry. A
+  numerically different launch can no longer collide with or resume under the
+  same identity.
+- **Made early-stop outcomes truthful.** `STOP_AFTER` records the actual
+  completed step, actual corpus coverage, the step of the last validation, and
+  whether the run stopped early. Non-finite losses are stored as JSON `null`
+  with an explicit flag rather than the non-standard bare `NaN` token.
+- **Tracked the intended experiment registry.** Replaced four stale local CPU
+  records with the fetched 19-run Modal registry, including the A100 milestone
+  receipt (`21c92807-418e-49ce-a78b-566b376f0914`). Historical non-finite values
+  were normalized to strict JSON without hiding that they were non-finite.
+- Added runtime-contract and provenance regression coverage; **31 local tests
+  pass**, along with syntax compilation and shard/config validation.
+- **Re-ran the repaired gate on a real L4.** Run
+  `eadfda3f-8ae6-40af-a26a-e6eca74a4206` completed 100/100 steps under Torch
+  2.13.0+cu130 with the 524,288-token batch, finite val_loss 4.37255, 16 probe
+  generations, and both format-3 checkpoint files committed. Cold-cache wall
+  time was 27.5 minutes, so the function timeout is now 45 minutes rather than
+  leaving only ~2.5 minutes of failure-prone margin.
+
+---
+
 ## 2026-08-08 (later) — training-dynamics changes from arXiv 2606.06533
 
 Read Biderman, Khan, Mireshghallah, Arnett, Barez & Saphra, *"Position: Don't Just

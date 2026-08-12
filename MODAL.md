@@ -19,25 +19,13 @@ launcher retains a local source check for that exact regression and now also:
 - forwards `GIT_SHA`/`GIT_DIRTY`, so the trainer's run registry records the
   checkout provenance even though the image intentionally contains no `.git`.
 
-The exact process-group call was checked against PyTorch **v2.10.0** source.
-Its backend capability table declares Gloo for both CPU and CUDA; constructing
-the group registers that Gloo instance for both device types. A CUDA
-`device_id` is validated and bound to the group, while eager device connection
-is attempted only for a backend that advertises splitting support. Therefore
-`init_process_group(backend="gloo", device_id=torch.device("cuda:0"))` and the
-CUDA `broadcast`/`all_reduce` calls are supported in the pinned version. Keeping
-Gloo also preserves the control arm's configured backend and config hash.
-See the [v2.10.0 backend table](https://github.com/pytorch/pytorch/blob/v2.10.0/torch/distributed/distributed_c10d.py#L265-L267)
-and [group construction](https://github.com/pytorch/pytorch/blob/v2.10.0/torch/distributed/distributed_c10d.py#L1856-L1857).
-
-That resolves the API-level concern, but it is not a substitute for the L4
-smoke: the wheel build, fused optimizer, actual CUDA tensors, bf16
-Newton–Schulz path, and compiled graphs remain unexecuted here.
-
-The Linux image remains on PyTorch 2.10.0. `requirements.txt` uses PyTorch
-2.13.0 only on Windows because the 2.10 Windows wheel reports
-`unsupported gloo device` before process-group initialization; this does not
-change the Modal control environment.
+The runtime is pinned to **PyTorch 2.13.0** on Linux and Windows. PyTorch 2.10
+is not a valid fallback: its compiled graph produced non-finite weights on the
+second optimizer update, while its Windows wheel also failed Gloo setup with
+`unsupported gloo device`. The 2.13 CUDA path—Gloo collectives, fused AdamW,
+bf16 Newton–Schulz, TorchInductor, checkpointing, and sampling—has run on real
+L4 and A100 hardware. Keeping Gloo preserves the control arm's configured
+backend and config hash.
 
 Run this cheap local gate before uploading or allocating a GPU:
 
@@ -136,8 +124,11 @@ automatically on first use by `create_if_missing=True`.
 modal run modal_app.py::smoke
 ```
 
-~4–8 minutes end to end on an **L4**, of which most is image build (first time
-only) and inductor cold start. **Under $0.10.**
+The function has a 45-minute timeout on an **L4**. The cold-cache, full-batch
+gate completed in 27.5 minutes on 2026-08-12; the wider timeout keeps normal
+variance from killing a paid run during final artifact writes. Image build and
+inductor cold start dominate the first launch; use the provider's current
+estimate before running rather than relying on a stale dollar figure.
 
 What it buys: every code path that cannot be exercised on a CPU box.
 bf16 parameters and the bf16 Newton–Schulz iteration inside `muon_update`,
@@ -146,14 +137,16 @@ AdamW (a CUDA-only kernel), the gloo-on-CUDA collectives, TorchInductor
 codegen, and the run-end checkpoint + sample path (including a ~1.4 GB
 checkpoint, which is most of the smoke's tail latency).
 
-Settings: `SMOKE=1 TRAIN_STEPS=100 COMPILE=1 BATCH_SIZE=65536 MBS=8
+Settings: `SMOKE=1 TRAIN_STEPS=100 COMPILE=1 BATCH_SIZE=524288 MBS=8
 VAL_TOKENS=524288`. Note `COMPILE=1` is forced — `train_baseline.py` defaults
 compile *off* under `SMOKE`, which is right for a ten-step CPU check and wrong
 here, since inductor cold start is one of the main risks a smoke exists to
 retire.
 
-**Do not read the smoke's val loss as signal.** `SMOKE=1` shrinks the batch to
-64 Ki tokens/step and evaluates a token slice. It is a plumbing test.
+**Do not read the smoke's val loss as signal.** It uses the control arm's real
+524,288-token batch so the fixed learning rates retain their intended
+LR-to-batch relationship, but evaluates only a validation slice. It is a
+plumbing test.
 
 More steps if you want a rough throughput reading before committing:
 
@@ -276,7 +269,8 @@ result.
   `38 x 2 x 124e6 x 4.33e6 = 4.1e16` = **+3.2%**.
 - 13 sample dumps (every 250 steps, including the final step), uncompiled eager;
   each pauses the training clock.
-- 4 checkpoints (1000/2000/3000/final) at ~1.4 GB, written to a Volume.
+- 13 checkpoints (every 250 steps, including final) at ~1.4 GB each, written
+  to a Volume.
 - Container start + inductor compile: 1–4 min cold, seconds with a warm cache
   volume.
 
@@ -390,35 +384,25 @@ container**. Downsides, both real:
 
 ## 8. Verification status
 
-The launcher has been checked locally with Modal 1.4.2. Importing the app and
-building its CLI schema succeeds. The installed API accepts `copy=True` on
-`Image.add_local_file`, named Volumes with `create_if_missing`, container-side
-`commit()`/`reload()`, direct function entrypoints, boolean negation flags, and
-the GPU strings `L4`, `A100-40GB`, and `H100`. The `modal volume put` CLI order
-used in §2 also matches its current help. The pinned PyPI releases
-`torch==2.10.0`, `numpy==2.2.6`, and `tiktoken==0.11.0` exist.
+The launcher, Volume mounts and commits, pinned 2.13 Linux wheel, Triton and
+compiler toolchain, Gloo CUDA collectives, fused mixed-dtype AdamW, bf16
+Newton–Schulz, compiled graphs, checkpoint/resume path, and W&B attachment have
+all run remotely. The completed 3,250-step A100-SXM4 control run reached
+val_loss 2.80559 in 3.07 h; the tracked run registry is the machine-readable
+receipt. The secondary Colab notebook now uses the same Torch and batch
+contract; rerun that notebook after changing either contract.
 
-Still remote-only and therefore gated by the L4 smoke:
-
-1. A Volume mount nested below image content (`data/shards` below `data/`) and
-   a periodic `Volume.commit()` while the trainer subprocess is writing.
-2. The default Linux Torch wheel, Triton, compiler toolchain, and baked
-   tiktoken cache working together in the built Modal image.
-3. The exact tensor mix through Gloo CUDA collectives, fused mixed-dtype AdamW,
-   bf16 Newton–Schulz, and both compiled graphs. PyTorch v2.10.0 source confirms
-   the Gloo + CUDA `device_id` API path; this experiment has not executed its
-   tensors on a GPU.
-4. Peak memory. MBS=8 on 40 GB is an estimate, dominated by fp32 logits at
-   `(8192, 50304)` = 1.65 GB plus live softcap/cross-entropy intermediates.
-5. Throughput and cost. The 35% MFU in §5 is a planning assumption; replace it
-   with `step_avg` from `modal run modal_app.py::smoke --train-steps 300`.
+The repaired contract was re-run cold on 2026-08-12: run
+`eadfda3f-8ae6-40af-a26a-e6eca74a4206` completed 100/100 steps on L4 with
+Torch 2.13.0+cu130, finite val_loss 4.37255, all 16 probe generations, and both
+format-3 checkpoint files committed to the runs Volume.
 
 Checks resolved from source/data rather than left as assumptions:
 
 - The val shard has 4,333,759 tokens. At MBS=8 the capped usable count is
   **4,333,568 tokens** (4,232 rows), divisible by 8.
 - A checkpoint has been observed at approximately 1.38 GB. A full run writes
-  four checkpoint sets (1000/2000/3000/final), so allow roughly 5.5 GB plus
-  rank-state sidecars and logs per run.
+  13 checkpoint sets (every 250 steps, including final), so allow roughly
+  18 GB plus rank-state sidecars and logs per run.
 - `forward_logits` is intentionally eager; sampling growing sequence lengths
   therefore does not cause a dynamic-shape recompilation storm.
