@@ -1,12 +1,22 @@
 # Project Plan — A Literary Model in the Weird & Eerie Register
 
-**Status:** Day 0. Blueprint chosen, architecture spec verified. No code written yet.
-**Last updated:** 2026-07-27
+**Status:** Milestones 0 and 1 complete. Baseline trained end to end — 3,250 steps,
+462 M-token corpus, val_loss 2.80559, 3.07 h on a rented A100. Prose is competent
+Victorian pastiche and **not yet eerie**; the samples say the register share (8.7%)
+and the missing general-text slice (0%) are the binding constraints. Next: the
+mixing dataloader, then Milestone 2 (`kda_mini.py`).
+**Last updated:** 2026-08-08 (see [CHANGELOG.md](CHANGELOG.md) for the run log)
 **Owner:** (you)
 
 ---
 
-### Changes in this revision
+### Changes in the 2026-07-27 revision (historical)
+
+> **This list is the original 2026-07-27 revision summary and is NOT a running
+> record.** Everything since — Milestone 0/1 completion, the torch 2.13 bump, the
+> seed-band gate, §5.1.1, and the resolved open decisions — is in
+> [CHANGELOG.md](CHANGELOG.md), which is the authoritative history. Do not maintain
+> two changelogs.
 
 1. **§3.1 is now verified line-by-line against the primary K3 report** (`k3_tech_report.pdf`,
    25pp, on disk). Every constant survived: `g_min = −5`, β₁ = 4, β₂ = 25, `N_s = 2`,
@@ -277,6 +287,16 @@ a three-way mystery.
    | loss curve (train + val) | |
    | sample log path (§4.0.5) | |
    | wall clock, hardware, step count | Cost accounting for the proposal |
+   | **dense intermediate checkpoints** | see below — the trajectory *is* data |
+
+   **Checkpoint densely and keep them.** `checkpoint_every` is now 250 (13 per
+   3250-step run, ~1.4 GB each) rather than 1000. Reason beyond crash recovery:
+   Biderman et al. 2023a found *intermediate checkpoints of one run predict final
+   memorization better than smaller fully-trained models do* — the trajectory
+   carries information endpoint comparisons miss. That partially undercuts the
+   small-proxy-run logic Phase 1 leans on, and it is the precondition for any
+   retrospective dynamics analysis. Storage on a Modal Volume is the cheapest
+   thing in this project.
 
    The blueprint already does a crude version of this: `train_gpt_simple.py` opens
    `sys.argv[0]` at startup and writes its **entire own source** into the run log
@@ -352,6 +372,21 @@ in its own file, with its own short run and its own curve.
    | g | additive residual → **Block AttnRes** | |
    | h | add **MTP head** | |
 
+**GATE before any swap is believed — measure the seed band first.** Every swap
+above produces a delta in val_loss. **A delta smaller than run-to-run seed
+variance is not a result, it is a draw.** We currently know this band is *not*
+zero — before `init_seed` existed, two identical 6-step runs differed by 0.0148 —
+and we have no measurement of it at 3250 steps. So: run the control at 3+ values
+of `INIT_SEED` (the override exists) and record the spread. Use that spread as the
+significance threshold for the whole ablation table, and screen candidate swaps at
+a shorter horizon where the band is also measured.
+
+Why this is not optional: Biderman et al. 2026 (§2.3) show high-level findings can
+be seed-sensitive, and that near threshold behaviours random variation produces
+distinct generalization clusters in different loss basins. Fixing the seed buys
+comparability but means we measure exactly one draw; without the band we cannot
+tell an architecture effect from that draw.
+
    By the time the flagship starts, you have seven or eight small ablations in hand —
    which is both good engineering and most of the Phase 1 proposal already written.
 
@@ -414,6 +449,25 @@ the bulk and spend all real effort on the slice nobody else has.
 | **Scripture & commentary** | 5–15% | Sefaria (Talmud, Midrash, Zohar) with aligned Hebrew/Aramaic–English; Perseus for Greek/Latin; PD translations of mystics, hermetica, early anthropology. |
 | **General modern text (+ a sliver of code)** | 10–20% | **Not optional.** Not for benchmarks — for syntactic and logical scaffolding, and because it is what keeps the model steerable rather than a beautiful ghost. |
 | **Register-rendered synthetic** | 5–15% | See §5.3. |
+
+### 5.1.1 The mixing dataloader — schedule, not just ratio
+
+**Unbuilt, and the binding constraint on Phase 1** (§4.2 varies exactly this).
+Slices are tagged and measured (`data/slices.py`) but cannot be reweighted, so the
+mix is currently whatever the corpus happens to contain: 91.3% backbone, 8.7%
+register, 0% general modern text.
+
+Design it to take a **schedule over training, not a static fraction.** Biderman et
+al. 2026 note that *data encountered later in training has a larger influence on
+model behaviour* — which is the mechanism behind §4.3's cooldown upweighting, and
+it means "15% register" and "8% rising to 25% through cooldown" are different
+interventions with different results. A ratio-only dataloader cannot express the
+second, and §4.3 explicitly asks for it. Cheap to design in now; expensive to
+retrofit once ablations depend on it.
+
+Corollary for §4.2: the A/B/C mix ablation is under-specified as written. "60/40"
+must state *whether the ratio is constant or scheduled*, or runs A/B/C are not
+comparable to each other or to anything later.
 
 ### 5.2 Sourcing order (deliberately: easiest first)
 
@@ -615,8 +669,8 @@ different axis.*
 
 | # | Milestone | Gate |
 |---|---|---|
-| 0 | Gutenberg tokens on disk in correct shard format, round-trip test passing, `manifest.jsonl` started | tonight — **laptop is sufficient** |
-| 1 | `train_gpt_simple.py` trains on own data on the 4090 (gloo + `mbs` patched); checkpointing, sampling, sample log all running | week 1–2 |
+| 0 | ~~Gutenberg tokens on disk, round-trip test, `manifest.jsonl`~~ **DONE** — 3,431 books → 3,178 trained → 462 M tokens | ✅ |
+| 1 | ~~baseline trains on own data; checkpointing, sampling, sample log running~~ **DONE 2026-08-08** — 3250 steps, val_loss 2.80559, 3.07 h on Modal A100. Ran on rented A100, not the 4090. | ✅ |
 | 2 | `kda_mini.py` passes sequential ↔ chunkwise ↔ `fla` at 1e-4 | week 2–3 |
 | 3 | **First K3-mini checkpoint**: ~120M active params, ~2B tokens, 3 readable paragraphs. It will be bad. It will be yours, architecture and data both. | **week 3** |
 | 4 | All swaps (a)–(h) benchmarked against control | week 4–6 |
@@ -626,8 +680,17 @@ different axis.*
 | 8 | Own tokenizer trained on final mix (64K → pad 65536) | after 6 |
 | 9 | Flagship run | on funding |
 
-**Explicitly do not yet:** rent GPUs, train the real tokenizer, build distributed
-training, or write the proposal. All of those get cheaper and better after Milestone 3.
+**Explicitly do not yet:** train the real tokenizer, build distributed training, or
+write the proposal. All of those get cheaper and better after Milestone 3.
+
+*Amended 2026-08-08:* "do not rent GPUs" is retired. It meant "don't rent before
+you have something to run"; Milestone 1 needed a GPU and the laptop was never one.
+Milestone 1 cost ~4 GPU-hours total including ~20 diagnostic L4 runs.
+
+*Also amended:* Milestone 1's samples showed the **register share (8.7%) and the
+missing general-text slice (0%) are the binding constraints, not model size.** The
+mixing dataloader that Phase 1's A/B/C ablation depends on is still unbuilt, which
+makes it the highest-value next build — ahead of `kda_mini.py`.
 
 ---
 
@@ -659,7 +722,10 @@ training, or write the proposal. All of those get cheaper and better after Miles
 - **Context length ambition.** 4K/8K is sufficient, and 8K matches K3's actual pretrain
   floor. But KDA + NoPE makes long-context extension unusually cheap, and "a model that
   holds a whole novel in mind" is thematically apt. Hold in reserve.
-- **Windows vs WSL2 vs Linux on the 4090 box.** Blocking for Milestone 1. WSL2 is the
+- ~~**Windows vs WSL2 vs Linux on the 4090 box.**~~ **RESOLVED 2026-08-08** — moot.
+  Training happens on rented Modal A100s; the 4090 was never used and the laptop
+  never could be. Nothing runs locally. Original note retained below for context:
+  WSL2 was the
   recommendation: it gets NCCL, Triton and inductor working without per-tool workarounds.
 
 ---
@@ -779,6 +845,16 @@ length and none of it matters yet.*
 - DeepSeek-V2 (MLA), DeepSeek-V3 (aux-loss-free balancing)
 - Gated Delta Networks; Parallelizing Linear Transformers with the Delta Rule
 - Muennighoff et al., data-constrained scaling (the ~4-epoch result)
+- **Biderman, Khan, Mireshghallah, Arnett, Barez, Saphra — "Position: Don't Just
+  'Fix it in Post': A Science of AI Must Study Training Dynamics"** (arXiv
+  2606.06533, ICML 2026). A *position* paper, not a method paper — no algorithms.
+  Taken from it: the seed-band gate (§4.1), schedule-aware mixing (§5.1.1), dense
+  checkpoints (§4.0.1). Also supplies the citation for our own §7.1 finding —
+  models "can only systematically compose concepts which appear in diverse
+  contexts during training" (Allen-Zhu & Li 2025; Okawa 2023; Chang 2025), which
+  is why a 0% general-text slice leaves no expository mode. Follow its citations,
+  not the paper, for method: Pythia (Biderman 2023), Tigges 2024 (circuit
+  consistency across checkpoints), Li 2025 (hundreds of small models).
 
 **Code**
 - **`records/track_3_optimization/train_gpt_simple.py`** — the blueprint (§3.5). In
