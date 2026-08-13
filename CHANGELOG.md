@@ -85,7 +85,7 @@ corpus happened to contain and could not be varied at all. It can now.
 ### Fixed
 
 - **Windows paths in the manifest broke the loader on Linux.** `slice_shards`
-  recorded `data\shardsy_slice\...`, and `Path(...).name` on POSIX returns the
+  recorded backslash-separated Windows paths, and `Path(...).name` on POSIX returns the
   *entire string* because backslash is not a separator — so no shard was found.
   The loader now globs its own naming convention and ignores recorded paths, and
   the tokenizer also records portable basenames. Third instance of
