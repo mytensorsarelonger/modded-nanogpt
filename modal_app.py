@@ -77,7 +77,9 @@ LOCAL_ROOT = Path(__file__).parent
 LOCAL_SHARDS = LOCAL_ROOT / "data" / "shards"
 
 # Files that must be real image-layer content. Keep this list in lockstep with
-# the trainer's local imports. During a remote import, the image-layer copies
+# the trainer's local imports AND with anything the test suite imports: the suite
+# runs in this image (see run_tests), and a runner that silently cannot collect
+# part of the suite is worse than no runner, because "tests pass" stops meaning it. During a remote import, the image-layer copies
 # already live under REPO_DIR rather than beside modal_app.py.
 _IMAGE_SOURCE_ROOT = LOCAL_ROOT if modal.is_local() else Path(REPO_DIR)
 IMAGE_FILES = {
@@ -85,6 +87,13 @@ IMAGE_FILES = {
     "config.py": _IMAGE_SOURCE_ROOT / "config.py",
     "probes.py": _IMAGE_SOURCE_ROOT / "probes.py",
     "training_state.py": _IMAGE_SOURCE_ROOT / "training_state.py",
+    "data/mixing.py": _IMAGE_SOURCE_ROOT / "data" / "mixing.py",
+    "data/mix_loader.py": _IMAGE_SOURCE_ROOT / "data" / "mix_loader.py",
+    "data/slices.py": _IMAGE_SOURCE_ROOT / "data" / "slices.py",
+    "data/dedup.py": _IMAGE_SOURCE_ROOT / "data" / "dedup.py",
+    "data/prepare_colab_smoke.py": _IMAGE_SOURCE_ROOT / "data" / "prepare_colab_smoke.py",
+    "data/quality_filter.py": _IMAGE_SOURCE_ROOT / "data" / "quality_filter.py",
+    "data/shard_writer.py": _IMAGE_SOURCE_ROOT / "data" / "shard_writer.py",
     "data/manifest.jsonl": _IMAGE_SOURCE_ROOT / "data" / "manifest.jsonl",
     "data/val_books.json": _IMAGE_SOURCE_ROOT / "data" / "val_books.json",
 }
@@ -157,6 +166,9 @@ image = (
         # every time you toggled WANDB. One rebuild now, stable thereafter; the
         # trainer only imports it when WANDB=1.
         "wandb==0.19.11",
+        # So the suite can run in the real environment. The dev box is Windows and
+        # nothing there is representative; see CHANGELOG 2026-08-06 "Lesson".
+        "pytest==8.3.4",
     )
     # Bake the GPT-2 BPE files into the image. Without this, every container
     # cold-start fetches them from openaipublic.blob.core.windows.net, which
@@ -176,8 +188,20 @@ image = (
     # manifest.jsonl (~5 MB) is what makes `data_manifest_hash` in the run
     # registry a real value instead of "unknown". PLAN.md §4.0.1 calls this the
     # field people skip and regret, so it ships.
+    .add_local_file(IMAGE_FILES["data/mixing.py"], f"{REPO_DIR}/data/mixing.py", copy=True)
+    .add_local_file(IMAGE_FILES["data/mix_loader.py"], f"{REPO_DIR}/data/mix_loader.py", copy=True)
+    .add_local_file(IMAGE_FILES["data/slices.py"], f"{REPO_DIR}/data/slices.py", copy=True)
+    .add_local_file(IMAGE_FILES["data/dedup.py"], f"{REPO_DIR}/data/dedup.py", copy=True)
+    .add_local_file(IMAGE_FILES["data/prepare_colab_smoke.py"], f"{REPO_DIR}/data/prepare_colab_smoke.py", copy=True)
+    .add_local_file(IMAGE_FILES["data/quality_filter.py"], f"{REPO_DIR}/data/quality_filter.py", copy=True)
+    .add_local_file(IMAGE_FILES["data/shard_writer.py"], f"{REPO_DIR}/data/shard_writer.py", copy=True)
     .add_local_file(IMAGE_FILES["data/manifest.jsonl"], f"{REPO_DIR}/data/manifest.jsonl", copy=True)
     .add_local_file(IMAGE_FILES["data/val_books.json"], f"{REPO_DIR}/data/val_books.json", copy=True)
+    # The suite runs HERE, not on the dev box. Windows is unrepresentative of the
+    # training environment in every way that has already cost this project time
+    # (see CHANGELOG 2026-08-06 "Lesson"), so "the tests pass" should mean they
+    # passed on the image that trains.
+    .add_local_dir(str(LOCAL_ROOT / "tests"), f"{REPO_DIR}/tests", copy=True)
 )
 
 # ---------------------------------------------------------------------------
@@ -589,7 +613,7 @@ def _run_training(overrides: dict[str, str], gpu_tag: str, git_sha: str,
 def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
           checkpoint_every: int = 0, sample_every: int = 0, val_every: int = 0,
           compile: bool = True, adamw_fused: bool = True, cache_bust: str = "",
-          muon_compile: bool = True, init_seed: int = 0,
+          muon_compile: bool = True, init_seed: int = 0, mix: str = "",
           wandb: bool = WANDB_ENABLED, wandb_project: str = WANDB_PROJECT,
           git_sha: str = _GIT_SHA, git_dirty: bool = _GIT_DIRTY) -> dict:
     """100 steps on a cheap L4 — buys the CUDA-only code paths for cents.
@@ -615,6 +639,7 @@ def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
             "COMPILE": "1" if compile else "0",
             "ADAMW_FUSED": "1" if adamw_fused else "0",
             "MUON_COMPILE": "1" if muon_compile else "0",
+            **({"MIX": mix} if mix else {}),
             **({"INIT_SEED": str(init_seed)} if init_seed else {}),
             **({"CACHE_BUST": cache_bust} if cache_bust else {}),
             # Deliberately the REAL batch size, not SMOKE's shrunken default.
@@ -657,6 +682,7 @@ def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
 )
 def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
           val_tokens: int = 0, compile: bool = True, adamw_fused: bool = True,
+          mix: str = "",
           resume: str = "", resume_dir: str = "",
           checkpoint_every: int = 0, sample_every: int = 0, val_every: int = 0,
           stop_after: int = 0,
@@ -685,6 +711,7 @@ def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
                  "COMPILE": "1" if compile else "0",
                  "ADAMW_FUSED": "1" if adamw_fused else "0",
             "MUON_COMPILE": "1" if muon_compile else "0",
+            **({"MIX": mix} if mix else {}),
             **({"INIT_SEED": str(init_seed)} if init_seed else {}),
             **({"CACHE_BUST": cache_bust} if cache_bust else {}),
                  **_wandb_overrides(wandb, wandb_project)}
@@ -698,6 +725,9 @@ def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
         overrides["SAMPLE_EVERY"] = str(sample_every)
     if val_every:
         overrides["VAL_EVERY"] = str(val_every)
+    if mix:
+        # PLAN.md §5.1.1. Empty means the control's single-stream loader.
+        overrides["MIX"] = mix
     if stop_after:
         # Deliberately NOT folded into train_steps: see STOP_AFTER in
         # train_baseline.py. Leaves the LR schedule and the resume sizing guard
@@ -740,6 +770,53 @@ def train_h100(train_steps: int = 3250, mbs: int = 16,
 # ---------------------------------------------------------------------------
 # Data verification (upload itself is done with the CLI — see MODAL.md)
 # ---------------------------------------------------------------------------
+
+# Repo-contract tests, as opposed to runtime tests. These assert things about the
+# working tree -- that requirements.txt and the Colab notebook agree with the
+# verified Modal runtime, that runs/index.jsonl holds a well-formed milestone
+# record -- so they are meaningless in the training image and are skipped there.
+#
+# They are NOT skipped because they fail. Satisfying them would mean baking
+# runs/index.jsonl into the image, and that file changes after every training run,
+# so the image hash would bust on every run and force a rebuild each time. Run
+# these against a checkout instead: `python -m pytest tests/test_runtime_contract.py`
+REPO_ONLY_TESTS = ("tests/test_runtime_contract.py",)
+
+
+@app.function(timeout=15 * 60, cpu=2.0)
+def run_tests(target: str = "tests", verbose: bool = False,
+              include_repo_tests: bool = False) -> int:
+    """Run the pytest suite inside the training image. CPU only — no GPU cost.
+
+    Exists because of the standing rule that nothing meaningful runs on the dev
+    box. A suite that only ever passed on Windows says nothing about the runtime
+    that actually trains: different OS, different torch build, different default
+    encoding.
+    """
+    import subprocess as sp
+    # Split so several paths can be passed as one --target argument; pytest takes
+    # them as separate positionals, not one space-containing path.
+    cmd = [sys.executable, "-m", "pytest", *target.split(),
+           "-q" if not verbose else "-v"]
+    if not include_repo_tests:
+        for t in REPO_ONLY_TESTS:
+            cmd += ["--ignore", t]
+        print(f"[tests] skipping repo-contract tests: {', '.join(REPO_ONLY_TESTS)} "
+              f"(run them against a checkout)")
+    print(f"[tests] {' '.join(cmd)} (cwd={REPO_DIR})")
+    rc = sp.run(cmd, cwd=REPO_DIR).returncode
+    print(f"[tests] exit={rc}")
+    return rc
+
+
+@app.local_entrypoint()
+def tests(target: str = "tests", verbose: bool = False,
+          include_repo_tests: bool = False):
+    rc = run_tests.remote(target=target, verbose=verbose,
+                          include_repo_tests=include_repo_tests)
+    if rc != 0:
+        raise SystemExit(rc)
+
 
 @app.function(volumes={DATA_MOUNT: data_vol}, timeout=15 * 60, cpu=4.0)
 def verify_data(checksums: bool = True) -> dict:

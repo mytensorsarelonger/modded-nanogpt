@@ -23,6 +23,16 @@ import sys
 import json
 import hashlib
 from pathlib import Path
+
+# Windows defaults stdout to cp1252 and this script prints book titles, which is
+# exactly what killed the Gutenberg download at 371/3000 on a title containing a
+# macron. Same guard as download_gutenberg.py and train_baseline.py.
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 import numpy as np
 import tiktoken
 
@@ -160,10 +170,16 @@ def select_val_books(books: list[dict]) -> set[int]:
     return val_ids
 
 
-def tokenize_books(books: list[dict], enc, val_ids: set[int]):
+def tokenize_books(books: list[dict], enc, val_ids: set[int],
+                   slice_of: dict | None = None):
     """
     Tokenize each book into its own uint16 array, prefixed with <|endoftext|>.
-    Returns (train_arrays, val_arrays, per_book_stats).
+    Returns (train_arrays, val_arrays, per_book_stats, train_by_slice).
+
+    `train_by_slice` buckets the same training arrays by slice so per-slice shards
+    can be written for the mixing dataloader (PLAN.md §5.1.1). Mixing needs to draw
+    from slice-specific pools, and in the combined stream the slices are
+    interleaved arbitrarily and therefore not selectable.
 
     Per-book arrays rather than one giant Python list: 44M boxed ints is ~1.4 GB
     of object overhead, and the corpus is meant to grow by 10-100x.
@@ -173,7 +189,9 @@ def tokenize_books(books: list[dict], enc, val_ids: set[int]):
         f"tokenizer eot {enc.eot_token} != config.eot_token {eot}"
     )
 
+    slice_of = slice_of or {}
     train_arrays, val_arrays, stats = [], [], {}
+    train_by_slice: dict[str, list] = {}
 
     for i, b in enumerate(books, 1):
         text = b["path"].read_text(encoding="utf-8", errors="replace")
@@ -194,6 +212,9 @@ def tokenize_books(books: list[dict], enc, val_ids: set[int]):
 
         split = "val" if b["gutenberg_id"] in val_ids else "train"
         (val_arrays if split == "val" else train_arrays).append(arr)
+        if split == "train":
+            sl = slice_of.get(b["gutenberg_id"], slices.BACKBONE)
+            train_by_slice.setdefault(sl, []).append(arr)
 
         sha = hashlib.sha256(b["path"].read_bytes()).hexdigest()
         stats[b["gutenberg_id"]] = {
@@ -207,7 +228,7 @@ def tokenize_books(books: list[dict], enc, val_ids: set[int]):
             print(f"  [{i}/{len(books)}] {b['title'][:48] if b['title'] else '?'} "
                   f"({len(arr):,} tokens, {split})")
 
-    return train_arrays, val_arrays, stats
+    return train_arrays, val_arrays, stats, train_by_slice
 
 
 def concat(arrays: list[np.ndarray]) -> np.ndarray:
@@ -216,13 +237,19 @@ def concat(arrays: list[np.ndarray]) -> np.ndarray:
     return np.concatenate(arrays)
 
 
-def write_shards(tokens: np.ndarray, split_name: str) -> list[dict]:
+def write_shards(tokens: np.ndarray, split_name: str,
+                 out_dir: Path | None = None) -> list[dict]:
     """Write tokens to one or more .bin shards."""
     if len(tokens) == 0:
         print(f"  WARNING: no {split_name} tokens, writing no shards")
         return []
 
-    config.shard_dir.mkdir(parents=True, exist_ok=True)
+    # Per-slice shards live in a SUBDIRECTORY, never alongside the combined ones.
+    # `gutenberg_train_*.bin` -- the glob the control arm uses -- would also match
+    # `gutenberg_train_backbone_000.bin`, so flat naming would silently make the
+    # control read the corpus three times in a scrambled order.
+    out_dir = out_dir or config.shard_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
     shard_size = config.shard_size
     num_shards = (len(tokens) + shard_size - 1) // shard_size
     print(f"Writing {num_shards} {split_name} shard(s)...")
@@ -230,7 +257,7 @@ def write_shards(tokens: np.ndarray, split_name: str) -> list[dict]:
     entries = []
     for i in range(num_shards):
         chunk = tokens[i * shard_size:(i + 1) * shard_size]
-        path = config.shard_dir / f"{split_name}_{i:03d}.bin"
+        path = out_dir / f"{split_name}_{i:03d}.bin"
         entry = write_shard(chunk, path, num_tokens=len(chunk))
         entries.append(entry)
         print(f"  Shard {i+1}/{num_shards}: {entry['num_tokens']:,} tokens, "
@@ -335,7 +362,8 @@ def main():
     val_ids = select_val_books(books)
 
     print(f"Tokenizing {len(books)} books...")
-    train_arrays, val_arrays, stats = tokenize_books(books, enc, val_ids)
+    train_arrays, val_arrays, stats, train_by_slice = tokenize_books(
+        books, enc, val_ids, slice_of=slice_of)
 
     train_tokens = concat(train_arrays)
     val_tokens = concat(val_arrays)
@@ -362,6 +390,30 @@ def main():
     train_shards = write_shards(train_tokens, "gutenberg_train")
     val_shards = write_shards(val_tokens, "gutenberg_val")
 
+    # Per-slice shards for the mixing dataloader (PLAN.md §5.1.1). Written IN
+    # ADDITION to the combined stream, not instead of it, and into a subdirectory:
+    # the control arm globs `gutenberg_train_*.bin` and must keep reading exactly
+    # the bytes it read for the Milestone 1 baseline. Costs ~890 MB of duplicate
+    # shard storage, which buys the guarantee that building mixing cannot perturb
+    # the control.
+    by_slice_dir = config.shard_dir / "by_slice"
+    slice_shards: dict[str, list] = {}
+    print("Writing per-slice shards for the mixing dataloader...")
+    for sl in sorted(train_by_slice):
+        toks = concat(train_by_slice[sl])
+        slice_shards[sl] = write_shards(toks, f"{sl}_train", out_dir=by_slice_dir)
+        print(f"  {sl}: {len(toks):,} tokens in {len(slice_shards[sl])} shard(s)")
+    # A slice named in a schedule but absent here would fail at draw time with an
+    # opaque error, so record what exists and let the loader check up front.
+    slice_pool_tokens = {sl: int(sum(e["num_tokens"] for e in v))
+                         for sl, v in slice_shards.items()}
+    # Record basenames as well: `shard_path` is absolute and platform-specific, so
+    # a consumer on another OS cannot parse it. The manifest is a portable
+    # artifact and should not carry `data\shards\...` into a Linux container.
+    for v in slice_shards.values():
+        for e in v:
+            e["shard_name"] = Path(e["shard_path"]).name
+
     shard_manifest = config.shard_dir / "manifest.json"
     with open(shard_manifest, "w", encoding="utf-8") as f:
         json.dump({
@@ -377,6 +429,9 @@ def main():
             "doc_separator": "eot_prefix_per_document",
             "val_split": "whole_book_holdout",
             "val_books_path": str(config.val_books_path.name),
+            "slice_shards": slice_shards,
+            "slice_pool_tokens": slice_pool_tokens,
+            "slice_shard_dir": by_slice_dir.name,
             "quality_filter": "tier1_heuristic",
             "quality_thresholds": THRESHOLDS,
             "dedup": {

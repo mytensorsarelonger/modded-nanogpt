@@ -61,6 +61,65 @@
   "doc_separator": "eot_prefix_per_document",
   "val_split": "whole_book_holdout",
   "val_books_path": "val_books.json",
+  "slice_shards": {
+    "backbone": [
+      {
+        "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\by_slice\\backbone_train_000.bin",
+        "num_tokens": 100000000,
+        "file_size": 200001024,
+        "sha256": "f4cec1c9d0ca1bee0378b616fb589f824d9973fc1cf152b07d69d4c88eb3d8f7",
+        "magic": 20240520,
+        "version": 1
+      },
+      {
+        "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\by_slice\\backbone_train_001.bin",
+        "num_tokens": 100000000,
+        "file_size": 200001024,
+        "sha256": "18536fdb5e77069161b403464cba372b895cd9b67bfab61b56d26fbbf6e26b5b",
+        "magic": 20240520,
+        "version": 1
+      },
+      {
+        "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\by_slice\\backbone_train_002.bin",
+        "num_tokens": 100000000,
+        "file_size": 200001024,
+        "sha256": "00658bf072a2eed2261d234dad0424b8daa76f6b99cb48c55c42f160a1226894",
+        "magic": 20240520,
+        "version": 1
+      },
+      {
+        "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\by_slice\\backbone_train_003.bin",
+        "num_tokens": 100000000,
+        "file_size": 200001024,
+        "sha256": "bbef77b3e835a4ddfe30b68aa8153abfab08e99de0cab5e043f3517a14a6c218",
+        "magic": 20240520,
+        "version": 1
+      },
+      {
+        "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\by_slice\\backbone_train_004.bin",
+        "num_tokens": 22078163,
+        "file_size": 44157350,
+        "sha256": "b69a9128be8ae4d982f050c43bcc04fa5556fe786ab71043c9f0a1c9fd5dc0ee",
+        "magic": 20240520,
+        "version": 1
+      }
+    ],
+    "register": [
+      {
+        "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\by_slice\\register_train_000.bin",
+        "num_tokens": 40189140,
+        "file_size": 80379304,
+        "sha256": "6b51c9c80f2becf1ce7bc02ac5b3d81835c758d0663756c885290fcfeca051a6",
+        "magic": 20240520,
+        "version": 1
+      }
+    ]
+  },
+  "slice_pool_tokens": {
+    "backbone": 422078163,
+    "register": 40189140
+  },
+  "slice_shard_dir": "by_slice",
   "quality_filter": "tier1_heuristic",
   "quality_thresholds": {
     "min_chars": 5000,

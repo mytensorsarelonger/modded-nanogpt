@@ -882,9 +882,40 @@ for _ in range(num_trials):
                f"(loader batches={loader_state.get('batches', 0)})", console=True)
 
     loader_pos = dict(loader_state)
-    train_loader = distributed_data_generator(
-        "data/shards/gutenberg_train_*.bin", batch_size,
-        seq_len=seq_len, start_batch=loader_state.get("batches", 0), state=loader_pos)
+    # MIX selects the slice-mixing loader (PLAN.md §5.1.1). Unset is the default
+    # and takes the original single-stream path, byte-identical to the Milestone 1
+    # baseline — this file is the control arm, so mixing has to be opt-in or the
+    # control stops being one.
+    mix_spec = os.environ.get("MIX", "").strip()
+    mix_loader = None
+    if mix_spec:
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "data"))
+        from mixing import parse_schedule            # noqa: E402
+        from mix_loader import MixingLoader          # noqa: E402
+        schedule = parse_schedule(mix_spec)
+        mix_loader = MixingLoader(
+            schedule, config.shard_dir, batch_size=batch_size, seq_len=seq_len,
+            train_steps=train_steps, device=device, rank=dist.get_rank(),
+            world_size=dist.get_world_size(), start_step=start_step,
+            state=loader_pos)
+        train_loader = mix_loader
+        ep = mix_loader.epochs()
+        print0(f"[mix] spec={mix_spec} slices={list(schedule.slices)}", console=True)
+        # Upweighting a small slice buys repetition, not diversity. Surface it:
+        # register at 60% out of a 40 M-token pool is many epochs on 371 books.
+        print0("[mix] projected epochs/slice at end: " + " ".join(
+            f"{n}={v:.1f}" for n, v in sorted(mix_loader.epochs_at(train_steps).items())
+        ), console=True)
+        over = [n for n, v in mix_loader.epochs_at(train_steps).items() if v > 4.0]
+        if over:
+            print0(f"[mix] WARNING: {', '.join(over)} exceed ~4 epochs, past the "
+                   f"point where repetition stops paying (PLAN.md §5.6). More "
+                   f"tokens for that slice, not a bigger weight.", console=True)
+    else:
+        train_loader = distributed_data_generator(
+            "data/shards/gutenberg_train_*.bin", batch_size,
+            seq_len=seq_len, start_batch=loader_state.get("batches", 0),
+            state=loader_pos)
 
     # start the clock
     training_time = 0
@@ -1054,6 +1085,11 @@ if _rank == 0:
     # uninterrupted one must finish at the SAME corpus position. Loss agreement
     # implies it, but this states it outright and survives in the registry.
     run_entry["final_loader_state"] = dict(loader_pos)
+    # A mixed run must be distinguishable from a control run in the registry, or
+    # the ablation table cannot tell them apart later.
+    run_entry["mix"] = mix_spec or None
+    if mix_loader is not None:
+        run_entry["mix_state"] = mix_loader.state()
     run_entry["start_step"] = start_step
     run_entry["logfile"] = logfile
     index_path = runs_dir / "index.jsonl"

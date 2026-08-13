@@ -40,6 +40,75 @@ from the code alone.
 
 ---
 
+## 2026-08-09 — mixing dataloader (PLAN.md §5.1.1)
+
+Phase 1's A/B/C ablation varies the slice mix; until now the mix was whatever the
+corpus happened to contain and could not be varied at all. It can now.
+
+### Added
+
+- **`data/mixing.py`** — the policy half, pure arithmetic, no torch or I/O.
+  `MixSchedule` is piecewise-linear keyframes over training progress, so a constant
+  ratio is one keyframe and §4.3's "flat then ramp through cooldown" is three.
+  Presets: `corpus` (8.7% as-is), `cooldown-ramp`, and `mix-a/b/c` for §4.2.
+- **`data/mix_loader.py`** — the I/O half. Per-slice pools, contiguous reads within
+  a slice, rows scattered so no microbatch is 100% one slice.
+- **Per-slice shards**, written *in addition to* the combined stream into
+  `data/shards/by_slice/`. Costs ~890 MB of duplicate storage and buys the
+  guarantee that building mixing cannot perturb the control arm.
+- 39 tests (23 policy, 16 loader).
+
+### Design decisions worth keeping
+
+- **No RNG.** Allocation is a deterministic function of step index, so a resumed
+  run recovers its per-slice cursors by replaying scalar arithmetic instead of
+  needing generator state checkpointed. This is why resume still works.
+- **Driftless allocation.** A fractional carry per slice, largest-remainder within
+  each step. Plain rounding of `w × N` biases the same direction forever when
+  `w × N` sits just below .5 — at 0.7% of 64 sequences it would deliver *nothing*,
+  ever. Verified on real data: target 0.800/0.200 → realised **0.8001/0.1999**.
+- **Contiguous reads within a slice**, matching the control's target-offset
+  convention. Reading each sequence separately would change that convention at
+  every sequence boundary and confound every A/B/C comparison with an unrelated
+  change.
+- **Progress keyed to `train_steps`, not the early-exit step**, mirroring the LR
+  schedule, so `STOP_AFTER` cannot change the mix a given step sees.
+
+### Verified on GPU
+
+- Mixing trains: 6 steps at mix-a, 10.826 → 7.103 → 6.076.
+- **Resume under mixing is faithful** — `val@3` restored exactly (7.10260),
+  `train_loss@6` identical, `val@6` within 1e-5 (the established noise floor).
+- Registry records `mix`, realised fractions, epochs per slice, and pool wraps, so
+  an ablation row states what it actually trained on rather than what was intended.
+
+### Fixed
+
+- **Windows paths in the manifest broke the loader on Linux.** `slice_shards`
+  recorded `data\shardsy_slice\...`, and `Path(...).name` on POSIX returns the
+  *entire string* because backslash is not a separator — so no shard was found.
+  The loader now globs its own naming convention and ignores recorded paths, and
+  the tokenizer also records portable basenames. Third instance of
+  Windows-authored data consumed on Linux; see the 2026-08-06 lesson.
+- **The checkpoint guard rejected mixed runs** (`loader batches=6, got None`) —
+  correctly, since the mixing path never populated loader state. It now mirrors the
+  control's `state` dict contract. Good example of a guard earning its place.
+
+### Known gaps
+
+- **Per-slice shards are flat-globbed, so `by_slice/` must not gain unrelated
+  `*_train_*.bin` files.** Naming collision is the hazard that already bit once:
+  `gutenberg_train_*.bin` would have matched `gutenberg_train_backbone_000.bin`,
+  silently making the control read the corpus three times.
+- `mix-a/b/c` assume backbone+register only. §4.2's real design includes general
+  modern text and scripture, both at **0%**, so those presets are not yet the
+  ablation §4.2 describes.
+- Upweighting a small pool buys *repetition*, not diversity: mix-c (60% register)
+  over a 40 M-token pool means ~26 epochs on 371 books in a full run while the
+  backbone sees ~1.5. `epochs_per_slice` is reported for exactly this reason.
+
+---
+
 ## 2026-08-08 (later) — training-dynamics changes from arXiv 2606.06533
 
 Read Biderman, Khan, Mireshghallah, Arnett, Barez & Saphra, *"Position: Don't Just

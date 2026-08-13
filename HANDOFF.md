@@ -29,14 +29,23 @@ bug, not an improvement.
 ## Review in this order — risk-ranked
 
 1. **`data/dedup.py`**. MinHash + LSH plus a blockwise high-recall prefilter and
-   exact full-shingle verification. Highest risk per line. I already
+   exact full-shingle verification. Was the highest risk per line. I already
    shipped one silent bug here: word ids came from `np.unique(return_inverse=True)`,
    which numbers words *per document*, so no two signatures were comparable and it
-   confidently reported zero duplicates. Remaining risk is the content-defined
-   subsampling (`h % KEEP_MOD == 0`, must stay offset-invariant), sparse-candidate
-   coverage, and the object-dtype modular arithmetic in `_signature`. The full
-   3,404-document pass now yields 2,626 candidates, 24 exact edges and 20
-   actionable clusters; removal is never based on MinHash alone.
+   confidently reported zero duplicates. The full 3,404-document pass yields 2,626
+   candidates, 24 exact edges and 20 actionable clusters; removal is never based
+   on MinHash alone.
+   **Independently verified 2026-08-12.** A from-scratch reimplementation sharing
+   no code paths — blake2b word hashes (vs crc32), splitmix64 multiply-shift
+   MinHash over the *full* shingle universe (vs modular-Mersenne over the
+   `h % 64` subsample), different seed — plus a title-token recall oracle and a
+   small-doc cardinality sweep confirmed **exactly the same 24 exact-Jaccard
+   edges** on the real corpus, zero disagreements either way. Cluster selection
+   was audited on the real output (every drop is directly adjacent to its
+   recorded representative; no representative dropped). Offset-invariance and
+   threshold behavior were probed on real books: J=0.97 front-matter shift and
+   J=0.85 caught, J=0.70 kept. The object-dtype Mersenne math matches a
+   pure-Python bigint reference on all 120 permutations.
 2. **Resume path in `train_baseline.py`** — `distributed_data_generator`'s
    `start_batch` fast-forward must stay in exact lockstep with the live loop's
    position arithmetic. If they diverge, a resumed run reads different data with no
@@ -130,21 +139,29 @@ Sampling has no KV cache (O(n²) generation) — known, and deliberate for now.
 
 ## Most useful thing you could tell me
 
-The original two questions are now answered: resume is verified against a real
-long-run checkpoint, and the CUDA paths have survived a 3-hour A100 run. What
-remains, in order:
+The original two questions are answered (resume verified against a real long-run
+checkpoint; CUDA paths survived a 3-hour A100 run), and as of 2026-08-12 so is
+the third: **`data/dedup.py` is verified correct** by independent
+reimplementation (see item 1 above). What remains is editorial, not engineering:
 
-1. **Is `data/dedup.py` correct?** Still the highest risk per line, still
-   unverified by anything except its own output. A silent failure here is
-   invisible in every downstream artifact.
-2. **Does the quality filter's threshold set still make sense at 3,431 books?**
+1. **Does the quality filter's threshold set still make sense at 3,431 books?**
    It was tuned by eye on 200 and now drops 177 documents. That needs a human
    policy judgement, not a code review.
-3. **Is the register/backbone slice boundary defensible?** Author-level tagging
+2. **Is the register/backbone slice boundary defensible?** Author-level tagging
    puts all ~52 E. F. Benson books in `register`, most of which are social
    comedies rather than ghost stories. `slice_overrides.json` exists for exactly
    this and is empty.
 
-Note (2) and (3) are editorial, not engineering. They are the calls I have been
-making by proxy from §5.2.3's author list, and they set the corpus composition
-that Phase 1's whole experiment varies.
+Both are the calls I have been making by proxy from §5.2.3's author list, and
+they set the corpus composition that Phase 1's whole experiment varies.
+
+One output of the dedup verification feeds that editorial pass: at the 0.80
+threshold the corpus **retains same-work edition pairs just below it** — *A
+Child's Garden of Verses* twice (J=0.77), *Treasure Island* twice (0.72), *The
+Secret Garden* twice (0.68), *Little Women* vs its full two-part edition (0.69),
+Frankenstein's 1818 vs 1831 texts (0.74), two translations of Plato's *Republic*
+(0.72), and *Carmilla* both standalone and inside *In a Glass Darkly* v.3
+(0.73). Whether any of these should also collapse is a threshold policy call,
+not a dedup defect. (The same sweep surfaced ~2 KB LibriVox audiobook-metadata
+stubs with high mutual boilerplate similarity; all are dropped downstream by the
+quality filter's `audiobook_metadata` rule, so nothing reaches training.)
