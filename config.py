@@ -62,7 +62,7 @@ class Config:
     manifest_path: Path = ROOT / "data" / "manifest.jsonl"
 
     # Validation split. Held out as WHOLE BOOKS, never a tail slice of the
-    # concatenated stream (PLAN.md §5.5.3, §7.2.2). Once chosen the set is
+    # concatenated stream (PLAN.md §5.5.3, §7.3.2). Once chosen the set is
     # pinned to val_books_path so it does not drift as the corpus grows.
     val_frac: float = 0.01
     # A val set of one book is a val set of one author, which is the defect the

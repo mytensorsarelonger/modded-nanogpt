@@ -10,6 +10,68 @@ from the code alone.
 
 ---
 
+## 2026-08-13 — RL strategy folded into the plan; Milestone 2 re-scoped
+
+No code changed; this entry records plan surgery. Two inputs arrived together:
+a handoff from the RL-strategy conversation (now versioned as
+[RL_STRATEGY.md](RL_STRATEGY.md)) and the public KDA-skepticism thread
+(Aug 2026), which argues K3 with sliding-window attention in place of KDA would
+perform about the same — a direct attack on this project's second thesis, and
+one K3-mini is unusually well placed to test at ablation cost.
+
+### Added
+
+- **`RL_STRATEGY.md`** — the handoff, verbatim: Phase 1's three jobs, the
+  measurement regime, the post-training ladder, verifiable in-domain rewards,
+  the 2025–26 RL field survey, and standing prohibitions. Governing finding:
+  **RL-ability is determined at pretrain/midtrain time**, so the corpus is
+  designed for RL before pretraining ends even though post-training execution
+  stays deferred.
+
+### Changed (all in PLAN.md)
+
+- **§4.2 — Phase 1 now carries three jobs**: install the register (unchanged),
+  install deliberation-shaped text, keep the general substrate. The A/B/C
+  ablation is declared under-specified until each run states constant-vs-scheduled
+  and the mix is given over the full five-slice taxonomy — the existing
+  `mix-a/b/c` presets cover backbone+register only (known gap, 2026-08-09).
+- **§5.1 — new craft-essay/writing-about-writing slice** (2–5%): prefaces,
+  criticism, writers' letters on writing. The deliberation seed crystal; there
+  is no natural "author thinks aloud, then writes" corpus, and this is the
+  nearest in-register analogue.
+- **§4.1 — swap (f) re-scoped to a pluggable attention mixer, and (f′) added**:
+  a 3:1 SWA:MLA control arm answering the KDA-skepticism thread. The confound
+  is recorded *before* the ablation exists: NoPE works because KDA carries
+  position, so the SWA arm keeps RoPE — mixer choice and positional encoding
+  are bundled, unavoidably. A tie leaves KDA distinguished only by long-context
+  extrapolation; a delta inside the seed band is a draw, and publishable as one.
+- **§4.1 step 1 — sampler-vs-trainer logprob-gap logging** must land in the same
+  change as the first `fla`/fused kernel. Rollout/training numerics mismatch is
+  a first-class bug in the 2026 RL literature and our stack (chunkwise KDA,
+  later MoE) is the elevated-risk shape for it.
+- **New §7.2 — exemplar/contrast-pair harness**, wired into the checkpoint eval
+  loop: hand-written-exemplar perplexity, contrast-pair loss gap (should *widen*
+  if the mix works), separate craft-essay perplexity, later restoration/
+  continuation accuracy. Time-sensitive — ablations that train before it exists
+  cannot be scored on the axis that matters. First application is retroactive
+  over the Milestone 1 checkpoints already on the Modal volume. Old §7.2
+  renumbered §7.3.
+- **§5.2 — register sourcing note**: mixer upweighting buys repetition, not
+  diversity (mix-c ≈ 26 epochs over 371 books), so raising the register share
+  honestly means more tokens; collect craft essays from the same authors while
+  there.
+- **§8 — Milestone 5 broadened** to include the general-text and craft slices
+  and marked as gating Milestone 6; amendment records that the critical path
+  ahead of A/B/C is corpus + measurement, with re-scoped Milestone 2 in
+  parallel.
+- **§9 — new open decision**: thinking-channel format, in-register vs. plain
+  English. Prototype both during Phase 1.
+- **Appendix A — "skip the post-training literature" retired.** Execution stays
+  deferred; the blanket literature stance did not survive "RL-ability is
+  determined at pretrain time."
+
+---
+
 ## 2026-08-12 — PR #1 merge-blocker repair
 
 - **Unified the executable runtime on PyTorch 2.13.0.** The Linux requirements,

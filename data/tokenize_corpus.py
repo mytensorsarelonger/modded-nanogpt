@@ -14,7 +14,7 @@ Three things this script is careful about, each of which was a bug:
    modded-nanogpt record `2025-07-12_BosAlign`.)
 2. Validation is held out as WHOLE BOOKS, chosen once and pinned to
    data/val_books.json, never as a tail slice of the concatenated stream — a
-   tail slice is one book by whatever sorts last. (PLAN.md §5.5.3, §7.2.2)
+   tail slice is one book by whatever sorts last. (PLAN.md §5.5.3, §7.3.2)
 3. Token ids are asserted below the uint16 ceiling before the cast, so a
    larger tokenizer cannot silently wrap ids into garbage at Milestone 8.
 """

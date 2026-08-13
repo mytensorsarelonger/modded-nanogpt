@@ -1,11 +1,15 @@
 # Project Plan — A Literary Model in the Weird & Eerie Register
 
-**Status:** Milestones 0 and 1 complete. Baseline trained end to end — 3,250 steps,
+**Status:** Milestones 0 and 1 complete; the mixing dataloader (§5.1.1) is built
+and GPU-verified (2026-08-09). Baseline trained end to end — 3,250 steps,
 462 M-token corpus, val_loss 2.80559, 3.07 h on a rented A100. Prose is competent
 Victorian pastiche and **not yet eerie**; the samples say the register share (8.7%)
-and the missing general-text slice (0%) are the binding constraints. Next: the
-mixing dataloader, then Milestone 2 (`kda_mini.py`).
-**Last updated:** 2026-08-08 (see [CHANGELOG.md](CHANGELOG.md) for the run log)
+and the missing general-text slice (0%) are the binding constraints. Phase 1 now
+carries three jobs, not one (§4.2, per [RL_STRATEGY.md](RL_STRATEGY.md)). Next:
+source the missing corpus slices (§5.1) and build the exemplar/contrast-pair eval
+harness (§7.2); `kda_mini.py` (Milestone 2) proceeds in parallel, built around a
+swappable attention mixer with a SWA control arm (§4.1).
+**Last updated:** 2026-08-13 (see [CHANGELOG.md](CHANGELOG.md) for the run log)
 **Owner:** (you)
 
 ---
@@ -358,6 +362,14 @@ in its own file, with its own short run and its own curve.
    layout fixed at `d_k × d_v` read with `Sᵀq` (Eq. 1) or you will lose an afternoon to
    a silent transpose bug. **This harness becomes the permanent regression test** when
    fused kernels get swapped in later.
+
+   ⚠ **The day `fla`/fused kernels enter is the day sampler-vs-trainer logprob
+   divergence becomes possible** — rollout path and training path computing
+   different logprobs is a first-class bug in the 2026 RL literature (silent
+   off-policyness → instability), and the risk is elevated for exactly our stack:
+   chunkwise KDA kernels vs. the training path, compounded later by MoE. Wire
+   **logprob-gap logging into the sampling path in the same change that lands the
+   kernel**, not when RL starts (RL_STRATEGY.md §6, item 4 of §7).
 2. Then, in this order (cheapest and safest first — revised for the blueprint's actual
    architecture):
 
@@ -368,9 +380,28 @@ in its own file, with its own short run and its own curve.
    | c | Muon → **Per-Head Muon** + weight clipping | ~15-line diff to `muon_update`; isolate it while the model is still dense. |
    | d | wd 0.001/0.05 → **0.1 throughout**, WSD-ish → **cosine + 1% warmup** | Also yields the cosine-vs-WSD ablation. Sweep each schedule's HPs independently — that is the whole point of K3's finding. |
    | e | dense FFN → **LatentMoE + QB** | 2 shared experts full-width, routed in latent ℓ=0.5·d, RMSNorm before `W↑`, 1 dense layer. |
-   | f | SDPA + RoPE → **3:1 KDA / Gated MLA hybrid, NoPE on MLA** | Hardest and most bug-prone, so it comes late, when the rest is known-good. Consumes the `kda_mini.py` kernel. |
+   | f | SDPA + RoPE → **3:1 KDA / Gated MLA hybrid, NoPE on MLA** | Hardest and most bug-prone, so it comes late, when the rest is known-good. Consumes the `kda_mini.py` kernel. **Build the mixer as a pluggable component** so (f′) is a config change, not a refactor. |
+   | f′ | SDPA + RoPE → **3:1 SWA / Gated MLA hybrid, RoPE retained** | The KDA-vs-SWA control arm — see below. |
    | g | additive residual → **Block AttnRes** | |
    | h | add **MTP head** | |
+
+**Swap (f′) — the KDA-vs-SWA control arm.** A live public argument (Aug 2026)
+holds that K3's quality owes little to KDA specifically: swap it for sliding-window
+attention, keep everything else, and the model performs about the same — and since
+SWA's KV cache is also bounded, the efficiency story doesn't distinguish them
+either. That claim attacks this project's second thesis (§1) head-on, and K3-mini
+at ablation scale is close to the cheapest credible testbed anyone could run for
+it: nobody will retrain K3 to check, but (f) vs (f′) costs one ablation run.
+
+**Known confound, recorded now so the result doesn't get over-read later:** it is
+*not* actually "everything else the same." NoPE on the MLA layers works because
+KDA's recurrent gating carries position (§3.1); SWA has no such carrier, so the
+(f′) arm keeps RoPE. The comparison therefore bundles mixer choice with positional
+encoding, unavoidably. If quality ties, the property that still distinguishes KDA
+is long-context extrapolation (KDA + NoPE extends with no positional surgery,
+§3.2) — exactly the ambition §9 holds in reserve. And a delta inside the seed band
+(below) is a draw, which is itself a finding worth writing up: "at this scale the
+mixer choice is inside noise."
 
 **GATE before any swap is believed — measure the seed band first.** Every swap
 above produces a delta in val_loss. **A delta smaller than run-to-run seed
@@ -406,6 +437,27 @@ Train three ablation-scale models (§3.3) differing only in corpus mix:
 | B | 60% | 40% |
 | C | 40% | 60% |
 
+**Phase 1 carries three jobs, not one** (RL_STRATEGY.md §2 — added 2026-08-13,
+on the finding that RL-ability is determined at pretrain time and we control the
+corpus):
+
+1. **Install the register** — the original job, unchanged.
+2. **Install deliberation-shaped text** for later post-training to amplify. There
+   is no natural "author thinks aloud, then writes" corpus; the nearest in-register
+   analogues are prefaces, craft essays, criticism, and writers' letters on writing
+   — the new craft-essay slice in §5.1. Thin, but it is the seed crystal.
+3. **Keep the general/instruction-shaped substrate** so the model stays steerable.
+   Already in §5.1 and already priced: its absence is what Milestone 1's `mundane`
+   probe collapse measured.
+
+Consequently the A/B/C table above is **under-specified until two things are
+fixed per run**: whether the ratio is *constant or scheduled* (§5.1.1 — the loader
+can now express both; the design still has to choose), and the mix stated over the
+**full slice taxonomy** — backbone / register / scripture / general / craft — not
+backbone+register only, which is all the current `mix-a/b/c` presets cover. Runs
+launched before the general-text and craft slices exist are not the ablation this
+section describes.
+
 Read the sampled prose side by side. Also record held-out perplexity on (i) weird-
 register text and (ii) general modern text, to see the tradeoff curve move. **The eval
 here is you, sitting with the outputs, deciding which one is the model you meant.**
@@ -413,7 +465,9 @@ here is you, sitting with the outputs, deciding which one is the model you meant
 Secondary ablations, most of which fall out of Phase 0.5 for free: cosine vs WSD under
 independently-tuned HPs (verified — K3 §3.2 found cosine wins when each schedule gets
 its own scaling-law search, and explicitly attributes contrary results to shared HPs);
-QB vs sign-update balancing; SiTU-GLU vs SwiGLU; 3:1 hybrid vs full attention.
+QB vs sign-update balancing; SiTU-GLU vs SwiGLU; 3:1 hybrid vs full attention; and
+(f) vs (f′) — 3:1 KDA:MLA vs 3:1 SWA:MLA, the live KDA-skepticism question, with
+the NoPE/RoPE confound noted in §4.1.
 
 **Exit criterion:** a chosen mix ratio, a stability story, and three paragraphs of
 prose worth showing someone. **Write the funding proposal now**, not before.
@@ -447,6 +501,7 @@ the bulk and spend all real effort on the slice nobody else has.
 | **Classical / public-domain literature backbone** | 50–70% | Gutenberg first; Internet Archive / HathiTrust PD scans later for volume. |
 | **Weird & eerie register** | 10–25% | Hand-curated. Small in absolute tokens; earns influence via upweighting and cooldown placement. |
 | **Scripture & commentary** | 5–15% | Sefaria (Talmud, Midrash, Zohar) with aligned Hebrew/Aramaic–English; Perseus for Greek/Latin; PD translations of mystics, hermetica, early anthropology. |
+| **Craft essays / writing-about-writing** | 2–5% | *Added 2026-08-13 (RL_STRATEGY.md §2, job 2).* Prefaces, criticism, writers' letters on writing — Poe's "Philosophy of Composition" is the type specimen. The nearest in-register analogue of deliberation text; thin in absolute tokens, but the seed crystal the entire post-training ladder amplifies. |
 | **General modern text (+ a sliver of code)** | 10–20% | **Not optional.** Not for benchmarks — for syntactic and logical scaffolding, and because it is what keeps the model steerable rather than a beautiful ghost. |
 | **Register-rendered synthetic** | 5–15% | See §5.3. |
 
@@ -483,6 +538,12 @@ comparable to each other or to anything later.
    here; taste does. Separate directory, per-document metadata from day one.
    Canon (all pre-1931, so US public domain): Poe, Bierce, Machen, Blackwood, Dunsany,
    M. R. James, Hodgson, Chambers, early *Weird Tales*.
+   Two additions (2026-08-13): **upweighting via the mixer buys repetition, not
+   diversity** — mix-c is ~26 epochs over 371 books (CHANGELOG 2026-08-09) — so
+   raising the register share honestly means more *tokens* (targeted Gutenberg
+   fetches, later IA scans), not just more weight. And while in each author's
+   corpus, **collect the craft-essay slice** (§5.1) — prefaces, criticism, letters
+   on writing — from the same authors where possible.
 4. **Internet Archive / HathiTrust PD scans — last.** The big backbone, but a real
    project: the data-engineering problem becomes *OCR quality filtering*, not web
    filtering (broken hyphenation, long-s/f confusions, running headers, binary
@@ -650,11 +711,36 @@ Compose it instead as:
 behavior generalizes across scaffolds rather than overfitting to one. Same principle,
 different axis.*
 
-### 7.2 The rest of the stack
+### 7.2 The exemplar / contrast-pair harness — build before any Phase 1 run
+
+*Added 2026-08-13 (RL_STRATEGY.md §3), and time-sensitive:* every mix ablation
+that trains before this exists produces curves that cannot be scored on the axis
+the project actually cares about. The preconditions are already in place — dense
+checkpoints every 250 steps and a run registry — so this is wiring, not
+infrastructure. Four tracked quantities, wired into the checkpoint eval loop:
+
+1. **Perplexity of hand-written exemplars** under every checkpoint and every mix
+   ablation. The exemplars are the eval set — the owner's asymmetry (can write
+   the target, cannot explain it) is the project's key resource, and this is how
+   likelihood training spends it.
+2. **Contrast-pair loss gap**: target writing vs. superficially-similar-but-wrong
+   writing (wrong in the way one can feel but not articulate). The gap should
+   *widen* if the mix works — the known-curve instrument for the actual goal.
+3. **Craft-essay/deliberation perplexity**, tracked separately (§4.2 job 2).
+4. Later: **restoration / continuation task accuracy at temperature** — the
+   verifiable in-domain tasks of RL_STRATEGY.md §5. The generators need no new
+   data; draft them from the existing corpus.
+
+**First application is retroactive:** the Milestone 1 checkpoints are on the
+Modal volume waiting to be measured, which also shakes the harness down before
+any result depends on it.
+
+### 7.3 The rest of the stack
 
 1. **Probe suite** (§7.1) — primary. Read it.
 2. **Held-out perplexity on two sets**: weird-register text, and general modern text.
-   The gap between them *is* the alien/useful tradeoff, made numeric.
+   The gap between them *is* the alien/useful tradeoff, made numeric. (§7.2 refines
+   this with exemplar and contrast-pair tracking.)
 3. **Loss curve vs. the `train_gpt_simple.py` control** — the architecture claim. One
    number to anchor against: the control reaches 3.28 val loss in 3250 steps on
    FineWeb10B at 12L×768.
@@ -674,7 +760,7 @@ different axis.*
 | 2 | `kda_mini.py` passes sequential ↔ chunkwise ↔ `fla` at 1e-4 | week 2–3 |
 | 3 | **First K3-mini checkpoint**: ~120M active params, ~2B tokens, 3 readable paragraphs. It will be bad. It will be yours, architecture and data both. | **week 3** |
 | 4 | All swaps (a)–(h) benchmarked against control | week 4–6 |
-| 5 | Sefaria + hand-curated register slice integrated | week 4–8 |
+| 5 | Sefaria + hand-curated register + **general-text + craft-essay** slices integrated — gates Milestone 6: without them A/B/C is not the §4.2 ablation | week 4–8 |
 | 6 | Phase 1 mix ablations complete; mix ratio chosen | week 8–10 |
 | 7 | **Funding proposal written** — real curves, real prose | week 10 |
 | 8 | Own tokenizer trained on final mix (64K → pad 65536) | after 6 |
@@ -691,6 +777,14 @@ Milestone 1 cost ~4 GPU-hours total including ~20 diagnostic L4 runs.
 missing general-text slice (0%) are the binding constraints, not model size.** The
 mixing dataloader that Phase 1's A/B/C ablation depends on is still unbuilt, which
 makes it the highest-value next build — ahead of `kda_mini.py`.
+
+*Amended 2026-08-13:* the mixing dataloader is built (CHANGELOG 2026-08-09),
+retiring the previous paragraph. With Phase 1 now carrying three jobs (§4.2), the
+critical path ahead of the A/B/C runs is **corpus and measurement, not compute**:
+the missing slices (general modern text, craft essays, register top-up —
+Milestone 5) and the §7.2 harness. Milestone 2 is re-scoped to a **swappable
+attention mixer with a SWA control arm** (§4.1 f/f′) and proceeds in parallel —
+it is compute-side and touches no corpus.
 
 ---
 
@@ -712,6 +806,13 @@ makes it the highest-value next build — ahead of `kda_mini.py`.
   cheap gate in front of it: hand-label a few hundred examples and try to calibrate the
   taste judge against them. If it can't be calibrated, don't build the slice. Only then
   test at ablation scale, before committing budget.
+- **Thinking-channel format: in-register vs. plain functional English**
+  (RL_STRATEGY.md §2). Plain English opens an escape hatch — synthetic deliberation
+  traces can be manufactured *without* violating the no-rephrasing rule, since
+  traces are a separate channel, not corpus — but risks bleeding into the output
+  register. In-register deliberation (the model reasons like a 19th-c. critic) is
+  more alien and on-thesis, and much harder to bootstrap. Prototype both on a small
+  run during Phase 1; decide before any post-training work begins.
 - **Sparsity: 8-of-64 vs 8-of-128.** Higher sparsity is more faithful to K3 and more
   interesting as a claim; lower is easier to keep balanced and to debug. Note K3's own
   §2.3 says extreme sparsity is precisely what *forced* the RMSNorm, SiTU-GLU and QB
@@ -821,9 +922,12 @@ makes it the highest-value next build — ahead of `kda_mini.py`.
 - **MFU** — model FLOPs utilization. 40–50% is good for dense bf16; MoE + linear
   attention hybrids land lower until kernels are tuned. Cost estimates scale inversely.
 
-*Skip the post-training literature (RLVR, GRPO, on-policy distillation, reward models)
-until there is a base model worth post-training. The K3 report's §4 is ~40% of its
-length and none of it matters yet.*
+*Post-training **execution** stays deferred until there is a base model worth
+post-training — but the earlier "skip the post-training literature" stance is
+retired as of 2026-08-13. The 2025–26 lesson is that RL-ability is determined at
+pretrain/midtrain time, which makes some of that literature a Phase 1 input: the
+strategy, the post-training ladder, and the condensed field survey live in
+[RL_STRATEGY.md](RL_STRATEGY.md). The K3 report's §4 remains unread until needed.*
 
 ---
 
