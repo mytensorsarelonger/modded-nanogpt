@@ -1092,6 +1092,20 @@ if _rank == 0:
         run_entry["mix_state"] = mix_loader.state()
     run_entry["start_step"] = start_step
     run_entry["logfile"] = logfile
+    # Per-run record FIRST, at a path only this run writes. index.jsonl is a
+    # single append-only file on a shared Volume, and concurrent runs clobber each
+    # other: three 1000-step seed runs each finished exit=0 and committed, and only
+    # ONE row survived, because a Volume commit is a whole-file snapshot of that
+    # container's view. Losing an ablation row silently is worse than losing a run,
+    # because the table still looks complete. So run.json is the source of truth
+    # and index.jsonl is a best-effort convenience rebuilt by `fetch`.
+    record_path = ckpt_dir / "run.json"
+    tmp_record = record_path.with_suffix(".json.tmp")
+    tmp_record.write_text(json.dumps(run_entry, indent=2, default=str),
+                          encoding="utf-8")
+    tmp_record.replace(record_path)
+    print0(f"Run record written to {record_path}", console=True)
+
     index_path = runs_dir / "index.jsonl"
     with open(index_path, "a", encoding="utf-8") as f:
         f.write(json.dumps(run_entry, allow_nan=False) + "\n")

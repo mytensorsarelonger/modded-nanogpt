@@ -898,6 +898,9 @@ def collect_results(include_logs: bool = True) -> dict:
     if (root / "modal_provenance.jsonl").exists():
         wanted.append(root / "modal_provenance.jsonl")
     wanted += sorted(root.glob("*/samples.log"))
+    # Per-run records are the authoritative registry; index.jsonl loses rows when
+    # runs execute concurrently. Always collect these.
+    wanted += sorted(root.glob("*/run.json"))
     if include_logs:
         # 24, not 5: a seed-band sweep (PLAN.md §4.1) needs every seed's val curve
         # in one fetch, and the registry keeps only the FINAL loss, so a truncated
@@ -944,6 +947,47 @@ def fetch(dest: str = "modal_out", include_logs: bool = True):
         print("nothing to fetch — the runs volume has no index.jsonl or samples.log yet")
     for rel in result["skipped"]:
         print(f"SKIPPED (size cap): {rel}")
+
+    # Rebuild the registry from the per-run records. index.jsonl on the Volume
+    # loses rows whenever runs overlap -- a Volume commit is a whole-file snapshot,
+    # so concurrent appenders overwrite each other (three seed runs, one surviving
+    # row; CHANGELOG 2026-08-19). run.json files have unique paths and cannot
+    # collide, so the union of them is the real registry. Written alongside, never
+    # over, whatever index.jsonl happened to survive.
+    records = {}
+    for rel, text in result["files"].items():
+        if rel.endswith("/run.json"):
+            try:
+                rec = json.loads(text)
+            except json.JSONDecodeError:
+                print(f"WARNING: {rel} is not valid JSON; skipped")
+                continue
+            rid = rec.get("run_id") or rel.split("/")[0]
+            records[rid] = rec
+    if records:
+        surviving = 0
+        idx = out_dir / "index.jsonl"
+        if idx.exists():
+            for line in idx.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                surviving += 1
+                records.setdefault(rec.get("run_id", f"row{surviving}"), rec)
+        rebuilt = out_dir / "index.rebuilt.jsonl"
+        with rebuilt.open("w", encoding="utf-8") as f:
+            for rid in sorted(records):
+                f.write(json.dumps(records[rid], default=str) + chr(10))
+        print(f"wrote {rebuilt} ({len(records)} runs; "
+              f"{surviving} from index.jsonl, "
+              f"{len(records) - surviving} recovered from run.json)")
+        if len(records) > surviving:
+            print("  NOTE: index.jsonl was missing rows that run.json recovered — "
+                  "expected whenever runs overlapped.")
     for rel in result["checkpoints"]:
         print(f"on volume, not downloaded: {rel}")
 

@@ -31,6 +31,9 @@ import statistics
 from pathlib import Path
 
 VAL_RE = re.compile(r"^step:(\d+)/(\d+)\s+val_loss:([0-9.]+|nan)", re.M)
+SEED_RE = re.compile(r"^init_seed=(\d+)", re.M)
+MIX_RE = re.compile(r"^\[mix\] spec=(\S+)", re.M)
+RESUMED_RE = re.compile(r"^Resumed from ", re.M)
 
 
 def load_runs(index_path: Path) -> list[dict]:
@@ -57,6 +60,46 @@ def val_curve(log_path: Path) -> dict[int, float]:
         if val != "nan":
             curve[int(step)] = float(val)
     return curve
+
+
+def scan_logs(logs_dir: Path, train_steps: int | None) -> dict:
+    """
+    Discover seed replicates from the LOGS, not the registry.
+
+    Log-primary on purpose. `index.jsonl` is a single append-only file on a shared
+    Modal Volume, and concurrent runs clobber each other's appends: three 1000-step
+    seed runs all finished exit=0 and only ONE row survived (CHANGELOG 2026-08-19).
+    Per-run logs have unique filenames and cannot collide, so they are the
+    trustworthy record. The registry is used only for extra metadata when present.
+    """
+    groups: dict[int, dict[int, dict]] = {}
+    if not logs_dir.is_dir():
+        return groups
+    for path in sorted(logs_dir.glob("*.txt")):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        seed_m = SEED_RE.search(text)
+        if not seed_m:
+            continue                       # predates init_seed; not a replicate
+        if MIX_RE.search(text):
+            continue                       # different data, not a seed replicate
+        if RESUMED_RE.search(text):
+            continue                       # shares a parent trajectory
+        pairs = VAL_RE.findall(text)
+        if not pairs:
+            continue
+        ts = int(pairs[-1][1])
+        if train_steps is not None and ts != train_steps:
+            continue
+        curve = {int(st): float(v) for st, _t, v in pairs if v != "nan"}
+        if not curve:
+            continue
+        seed = int(seed_m.group(1))
+        prev = groups.setdefault(ts, {}).get(seed)
+        # Keep the most complete run for a given (length, seed).
+        if prev is None or max(curve) > max(prev["curve"]):
+            groups[ts][seed] = {"run_id": path.stem, "curve": curve,
+                                "final": curve[max(curve)]}
+    return groups
 
 
 def collect(runs: list[dict], logs_dir: Path, train_steps: int | None) -> dict:
@@ -150,8 +193,17 @@ def main() -> None:
     ap.add_argument("--min-seeds", type=int, default=2)
     args = ap.parse_args()
 
-    runs = load_runs(Path(args.index))
-    groups = collect(runs, Path(args.logs), args.train_steps)
+    logs_dir = Path(args.logs)
+    groups = scan_logs(logs_dir, args.train_steps)
+    # Fold in anything the registry knows about that the logs missed (e.g. logs
+    # rotated off the volume). Logs win on conflict.
+    try:
+        for ts, by_seed in collect(load_runs(Path(args.index)), logs_dir,
+                                   args.train_steps).items():
+            for seed, rec in by_seed.items():
+                groups.setdefault(ts, {}).setdefault(seed, rec)
+    except FileNotFoundError:
+        pass
     report(groups, min_seeds=args.min_seeds)
 
 

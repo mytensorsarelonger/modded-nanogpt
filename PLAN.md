@@ -403,6 +403,39 @@ is long-context extrapolation (KDA + NoPE extends with no positional surgery,
 (below) is a draw, which is itself a finding worth writing up: "at this scale the
 mixer choice is inside noise."
 
+**MEASURED 2026-08-19 — band at 1000 steps: range 0.00198, stdev 0.00100 (n=3).**
+Seeds 1904 / 2718 / 3141, control loader, 1000 steps, A100. Final val_loss
+3.09428 / 3.09308 / 3.09230. Cost ~3 GPU-hours. Reproduce with
+`python analysis/seed_band.py --train-steps 1000`.
+
+The band *narrows* as training proceeds — seeds converge rather than drift apart:
+
+| horizon | range | stdev |
+|---|---|---|
+| 125 | 0.01222 | 0.00668 |
+| 250 | 0.01044 | 0.00569 |
+| 500 | 0.00643 | 0.00324 |
+| 1000 | **0.00198** | **0.00100** |
+
+**What this licenses.** At a 1000-step horizon a swap must move val_loss by more
+than **~0.002** to be distinguishable from the seed draw. Typical architecture
+changes at this scale (SwiGLU vs ReLU², MoE vs dense) move loss by 0.01–0.1, i.e.
+5–50× the band — so **single-seed ablations are defensible at this horizon**, which
+is what makes the eight-swap programme affordable at all.
+
+**What it does not license.** Two things. First, screening *earlier* is much
+noisier: at step 125 the band is 0.0122, six times wider, so a cheap 125-step
+screen needs effects above ~0.012. Second, and easy to get wrong: **this is the
+1000-step band and applies only to comparing 1000-step runs**, because
+`set_hparams` uses `progress = step / train_steps` so the LR schedule is relative.
+The 3250-step band is still unmeasured (~9 GPU-h for n=3). If the ablation table is
+reported at full length, that measurement is still owed.
+
+Caveat: n=3 gives a range, not a reliable variance estimate. Treat 0.002 as an
+order of magnitude, not a threshold to three digits.
+
+**Original gate text follows.**
+
 **GATE before any swap is believed — measure the seed band first.** Every swap
 above produces a delta in val_loss. **A delta smaller than run-to-run seed
 variance is not a result, it is a draw.** We currently know this band is *not*
