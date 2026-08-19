@@ -899,8 +899,12 @@ def collect_results(include_logs: bool = True) -> dict:
         wanted.append(root / "modal_provenance.jsonl")
     wanted += sorted(root.glob("*/samples.log"))
     if include_logs:
+        # 24, not 5: a seed-band sweep (PLAN.md §4.1) needs every seed's val curve
+        # in one fetch, and the registry keeps only the FINAL loss, so a truncated
+        # log set silently yields a band computed over fewer seeds than were run.
+        # Logs are ~52 KB, so 24 is ~1.3 MB against the 16 MB total cap.
         wanted += sorted((root / "_logs").glob("*.txt"),
-                         key=lambda p: p.stat().st_mtime, reverse=True)[:5]
+                         key=lambda p: p.stat().st_mtime, reverse=True)[:24]
 
     out, total, skipped = {}, 0, []
     for p in wanted:
