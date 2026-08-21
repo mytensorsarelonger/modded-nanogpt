@@ -9,6 +9,10 @@ logs/
 # English Gutenberg catalogue ~72 GB. Committing it bloats history permanently.
 data/gutenberg/
 data/shards*/*.bin
+# Per-slice shards for the mixing dataloader live one level deeper. The rule
+# above uses a single `*`, which does NOT cross a directory separator, so these
+# 882 MB were untracked-but-not-ignored -- one `git add -A` from entering history.
+data/shards*/by_slice/
 data/shards_pre_dedup_fix_*/
 data/manifest.pre_dedup_fix_*.jsonl
 *.bin.tmp

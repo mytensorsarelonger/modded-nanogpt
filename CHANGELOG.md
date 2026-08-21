@@ -10,6 +10,59 @@ from the code alone.
 
 ---
 
+## 2026-08-19 — seed band measured; run registry loses concurrent rows
+
+### Seed band (PLAN.md §4.1)
+
+Three 1000-step control runs, seeds 1904 / 2718 / 3141 on A100, ~3 GPU-hours.
+Final val_loss **3.09428 / 3.09308 / 3.09230** → **range 0.00198, stdev 0.00100**.
+
+The band narrows with horizon (0.0122 at step 125 → 0.0020 at step 1000): seeds
+converge rather than drift. Consequence: a swap must move val_loss by more than
+~0.002 at this horizon to be a result rather than a draw. Architecture changes at
+this scale typically move loss 0.01–0.1, so **single-seed ablations are defensible
+at 1000 steps** — which is what makes the eight-swap programme affordable.
+
+Two limits worth stating. Screening earlier is far noisier (0.0122 at step 125, 6×
+wider). And this band is **only valid for 1000-step comparisons**, because
+`progress = step / train_steps` makes the LR schedule relative; the 3250-step band
+is unmeasured and still owed if the table is reported at full length.
+
+### Fixed — the run registry silently lost 2 of 3 rows
+
+All three seed runs finished `exit=0` and committed the Volume. **Only one row
+appeared in `index.jsonl`** (23 → 24). A Modal Volume commit is a whole-file
+snapshot of the committing container's view, so three containers each read the
+23-row file, appended their own row, and overwrote one another. Last writer won.
+
+This would have quietly gutted Phase 0.5: running eight swaps concurrently is the
+obvious way to save wall clock, and the ablation table would have come back with
+one or two rows while *looking* complete. Losing a row silently is worse than
+losing a run.
+
+- Each run now writes **`runs/<run_id>/run.json`** — a unique path that cannot
+  collide — and that is the source of truth. `index.jsonl` is demoted to a
+  best-effort convenience.
+- `fetch` rebuilds **`index.rebuilt.jsonl`** from the union of `run.json` files
+  plus whatever survived in `index.jsonl`, and reports how many rows it recovered.
+- `analysis/seed_band.py` is **log-primary**: it discovers seed replicates by
+  scanning per-run logs (unique filenames, cannot collide) and uses the registry
+  only for extra metadata. This is how the band above was recovered despite two
+  registry rows being lost — the measurement survived the bug that ate the record.
+- Raised the log fetch cap from 5 to 24 for the same reason: at 5, a sweep of more
+  than five seeds would compute a band over fewer seeds than were run.
+
+### Also
+
+- My completion watch reported "all 3 seed runs finished" while they were still
+  training. It parsed the task count with a regex over a wrapping ASCII table;
+  the state string had become `ephemeral (detached)`, the parse produced nothing,
+  and it defaulted to zero live tasks. It could not distinguish *finished* from
+  *could not tell*. Rebuilt on `modal app list --json`, treating a parse failure or
+  a missing app as an explicit alarm. The registry cross-check is what caught it.
+
+---
+
 ## 2026-08-13 — RL strategy folded into the plan; Milestone 2 re-scoped
 
 No code changed; this entry records plan surgery. Two inputs arrived together:
@@ -69,59 +122,6 @@ one K3-mini is unusually well placed to test at ablation cost.
 - **Appendix A — "skip the post-training literature" retired.** Execution stays
   deferred; the blanket literature stance did not survive "RL-ability is
   determined at pretrain time."
-
----
-
-## 2026-08-19 — seed band measured; run registry loses concurrent rows
-
-### Seed band (PLAN.md §4.1)
-
-Three 1000-step control runs, seeds 1904 / 2718 / 3141 on A100, ~3 GPU-hours.
-Final val_loss **3.09428 / 3.09308 / 3.09230** → **range 0.00198, stdev 0.00100**.
-
-The band narrows with horizon (0.0122 at step 125 → 0.0020 at step 1000): seeds
-converge rather than drift. Consequence: a swap must move val_loss by more than
-~0.002 at this horizon to be a result rather than a draw. Architecture changes at
-this scale typically move loss 0.01–0.1, so **single-seed ablations are defensible
-at 1000 steps** — which is what makes the eight-swap programme affordable.
-
-Two limits worth stating. Screening earlier is far noisier (0.0122 at step 125, 6×
-wider). And this band is **only valid for 1000-step comparisons**, because
-`progress = step / train_steps` makes the LR schedule relative; the 3250-step band
-is unmeasured and still owed if the table is reported at full length.
-
-### Fixed — the run registry silently lost 2 of 3 rows
-
-All three seed runs finished `exit=0` and committed the Volume. **Only one row
-appeared in `index.jsonl`** (23 → 24). A Modal Volume commit is a whole-file
-snapshot of the committing container's view, so three containers each read the
-23-row file, appended their own row, and overwrote one another. Last writer won.
-
-This would have quietly gutted Phase 0.5: running eight swaps concurrently is the
-obvious way to save wall clock, and the ablation table would have come back with
-one or two rows while *looking* complete. Losing a row silently is worse than
-losing a run.
-
-- Each run now writes **`runs/<run_id>/run.json`** — a unique path that cannot
-  collide — and that is the source of truth. `index.jsonl` is demoted to a
-  best-effort convenience.
-- `fetch` rebuilds **`index.rebuilt.jsonl`** from the union of `run.json` files
-  plus whatever survived in `index.jsonl`, and reports how many rows it recovered.
-- `analysis/seed_band.py` is **log-primary**: it discovers seed replicates by
-  scanning per-run logs (unique filenames, cannot collide) and uses the registry
-  only for extra metadata. This is how the band above was recovered despite two
-  registry rows being lost — the measurement survived the bug that ate the record.
-- Raised the log fetch cap from 5 to 24 for the same reason: at 5, a sweep of more
-  than five seeds would compute a band over fewer seeds than were run.
-
-### Also
-
-- My completion watch reported "all 3 seed runs finished" while they were still
-  training. It parsed the task count with a regex over a wrapping ASCII table;
-  the state string had become `ephemeral (detached)`, the parse produced nothing,
-  and it defaulted to zero live tasks. It could not distinguish *finished* from
-  *could not tell*. Rebuilt on `modal app list --json`, treating a parse failure or
-  a missing app as an explicit alarm. The registry cross-check is what caught it.
 
 ---
 
