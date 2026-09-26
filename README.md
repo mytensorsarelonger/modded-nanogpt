@@ -16,12 +16,14 @@ provenance matters.
 | [HANDOFF.md](HANDOFF.md) | code-review orientation and risk ranking |
 | [MODAL.md](MODAL.md) | how to run anything on a GPU |
 
-### Status (2026-08-08)
+### Status (2026-09-17)
 
 Milestones 0–1 of 10 done. Corpus built (3,178 books, 462 M tokens) and the
 baseline has trained end to end: 3,250 steps, val_loss 2.80559, 3.07 h on a
-rented A100. **None of K3-mini itself exists yet** — no KDA, MoE, AttnRes or
-SiTU-GLU. `train_baseline.py` is a deliberately untuned dense control.
+rented A100. The mixing dataloader is built and GPU-verified, and the seed band is
+measured (range 0.00198 at 1,000 steps — single-seed ablations are defensible).
+**None of K3-mini itself exists yet** — no KDA, MoE, AttnRes or SiTU-GLU.
+`train_baseline.py` is a deliberately untuned dense control. Nothing is running.
 
 ### Two rules that will save you a day
 
@@ -34,15 +36,17 @@ SiTU-GLU. `train_baseline.py` is a deliberately untuned dense control.
 
 ### The binding constraint right now
 
-Not model size — **data mix**. The register slice is 8.7% (target 10–25%) and the
-general-modern-text slice is **0%**, which is why the model has no expository
-mode and loops on non-narrative prompts. The **mixing dataloader is unbuilt**, and
-it is the variable Phase 1's A/B/C ablation turns on, so it outranks
-`kda_mini.py` as the next thing to build.
+Not model size, and no longer the loader — **the corpus**. The register slice is
+8.7% (target 10–25%) and the general-modern-text slice is **0%**, which is why the
+model has no expository mode and loops on non-narrative prompts. The mixing
+dataloader that reweights slices is built; it simply has nothing new to draw from.
+So the next work is **sourcing slices** (PLAN.md §5.1.2 for what that costs) and
+the §7.2 eval harness — both CPU-only — with `kda_mini.py` in parallel.
 
-*Note: workspace-root `AGENTS.md` is Prime Lab / verifiers guidance for RL
-environment work. It does not apply to this repo — do not try to fit this project
-to those conventions.*
+*Agents and harnesses: read [AGENTS.md](AGENTS.md) in **this** directory. The
+workspace-root `AGENTS.md` one level up is Prime Lab / verifiers guidance for RL
+environment work and does **not** apply here — do not try to fit this project to
+those conventions.*
 
 ---
 

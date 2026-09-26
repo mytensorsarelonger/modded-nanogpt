@@ -1,15 +1,21 @@
 # Project Plan — A Literary Model in the Weird & Eerie Register
 
-**Status:** Milestones 0 and 1 complete; the mixing dataloader (§5.1.1) is built
-and GPU-verified (2026-08-09). Baseline trained end to end — 3,250 steps,
-462 M-token corpus, val_loss 2.80559, 3.07 h on a rented A100. Prose is competent
-Victorian pastiche and **not yet eerie**; the samples say the register share (8.7%)
-and the missing general-text slice (0%) are the binding constraints. Phase 1 now
-carries three jobs, not one (§4.2, per [RL_STRATEGY.md](RL_STRATEGY.md)). Next:
-source the missing corpus slices (§5.1) and build the exemplar/contrast-pair eval
-harness (§7.2); `kda_mini.py` (Milestone 2) proceeds in parallel, built around a
-swappable attention mixer with a SWA control arm (§4.1).
-**Last updated:** 2026-08-13 (see [CHANGELOG.md](CHANGELOG.md) for the run log)
+**Status:** Milestones 0 and 1 complete. Baseline trained end to end — 3,250 steps,
+462 M-token corpus, val_loss 2.80559, 3.07 h on a rented A100. The mixing dataloader
+(§5.1.1) is built and GPU-verified (2026-08-09), and the **seed band is measured**
+(§4.1, 2026-08-19): range 0.00198 at 1,000 steps, so single-seed ablations are
+defensible at that horizon and the eight-swap programme is affordable. Prose is
+competent Victorian pastiche and **not yet eerie**; the samples say the register
+share (8.7%) and the missing general-text slice (0%) are the binding constraints.
+Phase 1 now carries three jobs, not one (§4.2, per [RL_STRATEGY.md](RL_STRATEGY.md)).
+
+**Next, in order:** source the missing corpus slices (§5.1, mechanics in §5.1.2) and
+build the exemplar/contrast-pair eval harness (§7.2). `kda_mini.py` (Milestone 2)
+proceeds in parallel, built around a swappable attention mixer with a SWA control
+arm (§4.1). Nothing is currently running and no compute is committed.
+
+**Last updated:** 2026-09-17 (see [CHANGELOG.md](CHANGELOG.md) for the run log;
+[AGENTS.md](AGENTS.md) is the entry point for a new agent or harness)
 **Owner:** (you)
 
 ---
@@ -540,10 +546,12 @@ the bulk and spend all real effort on the slice nobody else has.
 
 ### 5.1.1 The mixing dataloader — schedule, not just ratio
 
-**Unbuilt, and the binding constraint on Phase 1** (§4.2 varies exactly this).
-Slices are tagged and measured (`data/slices.py`) but cannot be reweighted, so the
-mix is currently whatever the corpus happens to contain: 91.3% backbone, 8.7%
-register, 0% general modern text.
+**Built and GPU-verified 2026-08-09** (`data/mixing.py` + `data/mix_loader.py`;
+CHANGELOG 2026-08-09). A target of 0.800/0.200 came back as a realised 0.8001/0.1999
+over a full run, and the loader mirrors the control loader's `state` contract so
+resume works. What remains is not the loader but the **corpus it draws from**: the
+mix is still whatever exists on disk — 91.3% backbone, 8.7% register, 0% general
+modern text, 0% craft essays. See §5.1.2 for what adding a slice actually costs.
 
 Design it to take a **schedule over training, not a static fraction.** Biderman et
 al. 2026 note that *data encountered later in training has a larger influence on
@@ -556,6 +564,47 @@ retrofit once ablations depend on it.
 Corollary for §4.2: the A/B/C mix ablation is under-specified as written. "60/40"
 must state *whether the ratio is constant or scheduled*, or runs A/B/C are not
 comparable to each other or to anything later.
+
+### 5.1.2 What adding a slice actually costs
+
+*Added 2026-09-17, because this was folklore and Milestone 5 is three slices wide.*
+
+A slice is **four artifacts**, not a directory of text. Anything that produces them
+is a valid way to add one; the loader does not care where they came from.
+
+1. **Shards** at `data/shards/by_slice/{slice}_train_*.bin`, in the llm.c format
+   (1024-byte header, magic 20240520, version 1, uint16 payload — `data/shard_writer.py`).
+2. **Three manifest keys** in `data/shards/manifest.json`: `slice_shards[{slice}]`,
+   `slice_pool_tokens[{slice}]`, and `slices[{slice}]`.
+3. **A keyframe weight** in the `MixSchedule` (`data/mixing.py`). The loader raises
+   if a schedule draws from a slice with no shards; shards with zero weight are
+   harmless, so data can land before the schedule uses it.
+4. **Tokenizer agreement.** GPT-2 (`tiktoken`), vocab ≤ 50304, EOT 50256 prefixed
+   per document. `config.validate_against_shards()` enforces it, and the shards win.
+
+Note (2) is the only fiddly part, and note that `MixingLoader` **globs its own naming
+convention** rather than trusting `shard_path` — those paths are written by whatever
+machine tokenized the corpus, and a Windows path is unparseable on Linux
+(CHANGELOG 2026-08-13). So the paths in the manifest are documentation; the filenames
+are the contract.
+
+**Where the human effort actually is, per slice:**
+
+| Slice | Automated | Genuinely by hand |
+|---|---|---|
+| **General modern text** | Nearly all of it. `data/cached_finewebedu10B.py` pulls **FineWeb-EDU10B already GPT-2-tokenized in our exact shard format** (`kjj0/finewebedu10B-gpt2`, 100 M tokens/shard). No fetching, cleaning, filtering or tokenizing — rename into `by_slice/general_train_*.bin` and write the manifest keys. | One decision: EDU vs plain FineWeb, and how many shards. |
+| **Craft essays** | Fetch and tokenize (`download_gutenberg.py --author`, then `tokenize_corpus.py`). | **The list.** Which prefaces, criticism and letters-on-writing exist as separate PD volumes is a catalogue-reading problem taste has to do. Then a third slice label in `data/slices.py`, which currently knows only `backbone`/`register`. |
+| **Register top-up** | Fetch and tokenize, same path; `--canon` already encodes the canon queries. | Author-by-author selection (§5.2.3), and `slice_overrides.json`, which is still empty — so E. F. Benson's ~52 social comedies are counted as register today. |
+
+**The general-text slice is therefore the cheap one and should go first**: it is the
+defect Milestone 1's `mundane` probe actually measured, it needs no taste, and it is a
+download plus a manifest edit. The two Gutenberg-derived slices need a human with a
+catalogue, and that work does not parallelize with automation — it *is* §5.2.3.
+
+**Do not re-tokenize the existing corpus to add a slice.** Backbone and register
+shards are unchanged by a new slice arriving beside them; `tokenize_corpus.py` only
+needs to run over the *new* books, writing new per-slice shards. Re-running it wholesale
+invites a val-holdout reshuffle, which silently breaks comparability with Milestone 1.
 
 ### 5.2 Sourcing order (deliberately: easiest first)
 

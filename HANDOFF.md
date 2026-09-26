@@ -130,10 +130,12 @@ modal run --detach modal_app.py::train --resume <run_id>/ckpt_01000.pt
 ## Already known — please don't file these
 
 Full list in [CHANGELOG.md](CHANGELOG.md) under *Known gaps*. The main ones:
-register slice is 8.7% (under target) and the mixing dataloader to upweight it is
-unbuilt; `pub_year` is null for all documents because Gutendex cannot supply it;
+register slice is 8.7% (under target) and the general-text slice is 0% — the mixing
+dataloader that reweights them is built (2026-08-09), so this is a corpus gap, not a
+code gap; `pub_year` is null for all documents because Gutendex cannot supply it;
 `slice_overrides.json` is empty so E. F. Benson's social comedies are mis-tagged as
-register; no `kda_mini.py` yet; no tier-2 model-based quality classifier.
+register; no `kda_mini.py` yet; no tier-2 model-based quality classifier; the
+3,250-step seed band is unmeasured (only the 1,000-step band is).
 
 Sampling has no KV cache (O(n²) generation) — known, and deliberate for now.
 

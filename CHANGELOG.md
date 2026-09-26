@@ -10,6 +10,64 @@ from the code alone.
 
 ---
 
+## 2026-09-17 — docs brought current; `AGENTS.md` added
+
+No behaviour change. Project resumed after a ~4-week gap; the docs had drifted
+behind the code in a way that would mislead anyone re-entering, including a
+different agent harness.
+
+### Added — `AGENTS.md`
+
+A harness-agnostic entry point at the repo root. Nothing in this repo told a fresh
+agent where intent lived, that the dev box must not run anything, or that
+`train_baseline.py` is a control arm where an improvement is a defect. Those three
+facts are each worth a day, and all three had to be re-established verbally every
+session.
+
+It deliberately holds no plan and no history — it points at PLAN.md and
+CHANGELOG.md, which keep their existing single jobs. It also disambiguates itself
+from the **workspace-root** `AGENTS.md` one directory up, which is Prime Lab /
+verifiers guidance for RL environment work and does not apply here.
+
+### Added — PLAN.md §5.1.2, "What adding a slice actually costs"
+
+Milestone 5 is three slices wide and the mechanics of adding one were folklore. The
+section states the four artifacts a slice actually is (shards under the naming
+convention, three manifest keys, a schedule keyframe, tokenizer agreement) and
+splits the work per slice into automated vs genuinely-by-hand.
+
+The useful finding: **the general-text slice is nearly free.** FineWeb-EDU10B ships
+from `kjj0/finewebedu10B-gpt2` already GPT-2-tokenized in our exact llm.c shard
+format, at 100 M tokens per shard, and `data/cached_finewebedu10B.py` already
+downloads it. No fetching, cleaning, filtering or tokenizing — it is a download
+plus three manifest keys. That makes the 0%-general-text gap, which is the defect
+Milestone 1's `mundane` probe actually measured, the cheapest of the three to close.
+The two Gutenberg-derived slices (craft essays, register top-up) need a human with a
+catalogue, and that part does not parallelize with automation — it *is* §5.2.3.
+
+Also recorded there: **do not re-tokenize the existing corpus to add a slice.** New
+per-slice shards land beside the old ones untouched; a wholesale re-run risks a
+val-holdout reshuffle, which would silently break comparability with Milestone 1.
+
+### Fixed — stale claims in four files
+
+- **PLAN.md** status header was dated 2026-08-13 and omitted the seed band entirely.
+- **PLAN.md §5.1.1** still opened "**Unbuilt, and the binding constraint on Phase 1**"
+  — the loader landed 2026-08-09, contradicting the file's own header two pages up.
+- **README.md** fork banner said "the **mixing dataloader is unbuilt** … so it
+  outranks `kda_mini.py` as the next thing to build," which would have sent a reader
+  to rebuild something that exists.
+- **HANDOFF.md** known-gaps list repeated the same claim.
+- **CHANGELOG.md** *Known gaps* was last refreshed 2026-08-08 and listed the mixing
+  dataloader as "highest-value unbuilt thing in the repo."
+
+The pattern is worth naming: every one of these was written when true, and each
+described the *loader* rather than the *corpus*. The blocker moved from code to data
+on 2026-08-09 and five files kept saying otherwise for five weeks. Status lines that
+name a blocker need re-reading whenever the blocker clears.
+
+---
+
 ## 2026-08-19 — seed band measured; run registry loses concurrent rows
 
 ### Seed band (PLAN.md §4.1)
@@ -621,16 +679,26 @@ Claims checked by test rather than assertion:
 
 ### Known gaps
 
-*Refreshed 2026-08-08 — post-Milestone-1 state.*
+*Refreshed 2026-09-17. The 2026-08-08 text is superseded — the mixing dataloader
+landed 2026-08-09 and the seed band was measured 2026-08-19, so what blocks Phase 1
+is now corpus and measurement, not code.*
 
 **Blocking Phase 1:**
-- **Mixing dataloader unbuilt.** Slices are tagged and measured but cannot be
-  reweighted, so the ratio Phase 1's A/B/C ablation varies is not yet a knob.
-  Highest-value unbuilt thing in the repo.
 - **General-modern-text slice is 0%.** §5.1 budgets 10–20% and calls it "not
   optional." Milestone 1's samples showed exactly what its absence costs: no
-  expository mode, repetition collapse on non-narrative prompts.
-- **Register slice is 8.7%**, below §5.1's 10–25% band.
+  expository mode, repetition collapse on non-narrative prompts. Cheapest of the
+  three to fix — FineWeb-EDU10B ships GPT-2-tokenized in our shard format
+  (PLAN.md §5.1.2).
+- **Register slice is 8.7%**, below §5.1's 10–25% band. Needs more *tokens*, not
+  more weight — upweighting buys repetition (mix-c is ~26 epochs over 371 books).
+- **Craft-essay slice is 0%**, added 2026-08-13 as Phase 1 job 2.
+- **§7.2 exemplar/contrast-pair harness unbuilt**, and time-sensitive: ablations
+  that train before it exists cannot be scored on the axis the project cares about.
+- ~~Mixing dataloader unbuilt~~ — **landed 2026-08-09**, realised 0.8001/0.1999
+  against a 0.800/0.200 target.
+- ~~Seed band unknown~~ — **measured 2026-08-19** at 1,000 steps (range 0.00198).
+  The 3,250-step band is still unmeasured and is owed if the ablation table is
+  reported at full length.
 
 **Architecture — none of K3-mini exists yet:** no `kda_mini.py`, no LatentMoE,
 no Quantile Balancing, no AttnRes, no SiTU-GLU, no MTP head. Phase 0.5 has not
