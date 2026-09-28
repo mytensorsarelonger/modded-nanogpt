@@ -87,6 +87,10 @@ IMAGE_FILES = {
     "config.py": _IMAGE_SOURCE_ROOT / "config.py",
     "probes.py": _IMAGE_SOURCE_ROOT / "probes.py",
     "training_state.py": _IMAGE_SOURCE_ROOT / "training_state.py",
+    "baseline_model.py": _IMAGE_SOURCE_ROOT / "baseline_model.py",
+    "evals/exemplar.py": _IMAGE_SOURCE_ROOT / "evals" / "exemplar.py",
+    "evals/exemplar_data/register_exemplars.txt": _IMAGE_SOURCE_ROOT / "evals" / "exemplar_data" / "register_exemplars.txt",
+    "evals/exemplar_data/craft_essays.txt": _IMAGE_SOURCE_ROOT / "evals" / "exemplar_data" / "craft_essays.txt",
     "data/mixing.py": _IMAGE_SOURCE_ROOT / "data" / "mixing.py",
     "data/mix_loader.py": _IMAGE_SOURCE_ROOT / "data" / "mix_loader.py",
     "data/slices.py": _IMAGE_SOURCE_ROOT / "data" / "slices.py",
@@ -185,6 +189,10 @@ image = (
     .add_local_file(IMAGE_FILES["config.py"], f"{REPO_DIR}/config.py", copy=True)
     .add_local_file(IMAGE_FILES["probes.py"], f"{REPO_DIR}/probes.py", copy=True)
     .add_local_file(IMAGE_FILES["training_state.py"], f"{REPO_DIR}/training_state.py", copy=True)
+    .add_local_file(IMAGE_FILES["baseline_model.py"], f"{REPO_DIR}/baseline_model.py", copy=True)
+    .add_local_file(IMAGE_FILES["evals/exemplar.py"], f"{REPO_DIR}/evals/exemplar.py", copy=True)
+    .add_local_file(IMAGE_FILES["evals/exemplar_data/register_exemplars.txt"], f"{REPO_DIR}/evals/exemplar_data/register_exemplars.txt", copy=True)
+    .add_local_file(IMAGE_FILES["evals/exemplar_data/craft_essays.txt"], f"{REPO_DIR}/evals/exemplar_data/craft_essays.txt", copy=True)
     # manifest.jsonl (~5 MB) is what makes `data_manifest_hash` in the run
     # registry a real value instead of "unknown". PLAN.md §4.0.1 calls this the
     # field people skip and regret, so it ships.
@@ -320,7 +328,10 @@ def _preflight_source(src: str) -> None:
 # Run the same checks at import time, so `modal run` fails on the local machine
 # in milliseconds. A remote import checks the image-layer copies under
 # REPO_DIR as a second line of defense.
-for _source_name in ("train_baseline.py", "config.py", "probes.py", "training_state.py"):
+for _source_name in (
+    "train_baseline.py", "config.py", "probes.py", "training_state.py",
+    "baseline_model.py", "evals/exemplar.py",
+):
     _source = IMAGE_FILES[_source_name].read_text(encoding="utf-8")
     if _source_name == "train_baseline.py":
         _preflight_source(_source)
@@ -612,6 +623,7 @@ def _run_training(overrides: dict[str, str], gpu_tag: str, git_sha: str,
 )
 def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
           checkpoint_every: int = 0, sample_every: int = 0, val_every: int = 0,
+          register_every: int = 0,
           compile: bool = True, adamw_fused: bool = True, cache_bust: str = "",
           muon_compile: bool = True, init_seed: int = 0, mix: str = "",
           wandb: bool = WANDB_ENABLED, wandb_project: str = WANDB_PROJECT,
@@ -661,6 +673,9 @@ def smoke(train_steps: int = 100, resume: str = "", resume_dir: str = "",
             **({"CHECKPOINT_EVERY": str(checkpoint_every)} if checkpoint_every else {}),
             **({"SAMPLE_EVERY": str(sample_every)} if sample_every else {}),
             **({"VAL_EVERY": str(val_every)} if val_every else {}),
+            # §7.2: force the register eval on in a smoke (its default matches
+            # the checkpoint cadence, which a plumbing smoke sets to 0).
+            **({"REGISTER_EVERY": str(register_every)} if register_every else {}),
             **_wandb_overrides(wandb, wandb_project),
         },
         gpu_tag=SMOKE_GPU,
@@ -685,6 +700,7 @@ def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
           mix: str = "",
           resume: str = "", resume_dir: str = "",
           checkpoint_every: int = 0, sample_every: int = 0, val_every: int = 0,
+          register_every: int = 0,
           stop_after: int = 0,
           muon_compile: bool = True, cache_bust: str = "", init_seed: int = 0,
           wandb: bool = WANDB_ENABLED, wandb_project: str = WANDB_PROJECT,
@@ -725,6 +741,9 @@ def train(train_steps: int = 3250, mbs: int = 8, batch_size: int = 0,
         overrides["SAMPLE_EVERY"] = str(sample_every)
     if val_every:
         overrides["VAL_EVERY"] = str(val_every)
+    if register_every:
+        # §7.2: 0 leaves the trainer's default (config.checkpoint_every).
+        overrides["REGISTER_EVERY"] = str(register_every)
     if mix:
         # PLAN.md §5.1.1. Empty means the control's single-stream loader.
         overrides["MIX"] = mix
@@ -840,39 +859,191 @@ def verify_data(checksums: bool = True) -> dict:
         return {"ok": False, "error": f"{mpath} not found — nothing uploaded?"}
     manifest = json.loads(mpath.read_text())
 
+    # Top-level shards land at the volume root; per-slice shards live under
+    # slice_shard_dir (PLAN.md 5.1.2). Until 2026-09-27 this loop covered only
+    # train_shards/val_shards, so the entire slice pool was uploaded and then
+    # consumed by mixing runs with no checksum ever checked — exactly the
+    # "quietly becomes a comparison of two truncated files" failure above.
+    sub = manifest.get("slice_shard_dir", "by_slice")
+    targets: list[tuple[str, dict, str]] = [
+        ("train_shards", e, "") for e in manifest["train_shards"]
+    ]
+    targets += [("val_shards", e, "") for e in manifest["val_shards"]]
+    for slice_name, entries in manifest.get("slice_shards", {}).items():
+        targets += [(f"slice:{slice_name}", e, sub) for e in entries]
+    for slice_name, entries in manifest.get("slice_val_shards", {}).items():
+        targets += [(f"slice_val:{slice_name}", e, "") for e in entries]
+
     results, ok = [], True
-    for kind in ("train_shards", "val_shards"):
-        for entry in manifest[kind]:
-            # manifest.json records absolute *Windows* shard paths. Only the
-            # basename is portable, and it is all that is needed: config.py
-            # never reads shard_path, and the dataloader globs.
-            name = entry["shard_path"].replace("\\", "/").rsplit("/", 1)[-1]
-            p = Path(DATA_MOUNT) / name
-            row = {"file": name, "kind": kind, "present": p.exists()}
-            if p.exists():
-                row["size_ok"] = p.stat().st_size == entry["file_size"]
-                row["size"] = p.stat().st_size
-                if checksums:
-                    h = hashlib.sha256()
-                    with open(p, "rb") as f:
-                        for chunk in iter(lambda: f.read(1 << 22), b""):
-                            h.update(chunk)
-                    row["sha256_ok"] = h.hexdigest() == entry["sha256"]
-            ok &= row.get("present", False) and row.get("size_ok", False) \
-                and row.get("sha256_ok", True)
-            results.append(row)
-            print(f"[verify] {row}")
+    for kind, entry, subdir in targets:
+        # manifest.json records absolute *Windows* shard paths. Only the
+        # basename is portable, and it is all that is needed: config.py
+        # never reads shard_path, and the dataloader globs.
+        name = entry["shard_path"].replace("\\", "/").rsplit("/", 1)[-1]
+        p = Path(DATA_MOUNT) / subdir / name
+        row = {"file": name, "kind": kind, "present": p.exists()}
+        if p.exists():
+            row["size_ok"] = p.stat().st_size == entry["file_size"]
+            row["size"] = p.stat().st_size
+            if checksums:
+                h = hashlib.sha256()
+                with open(p, "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 22), b""):
+                        h.update(chunk)
+                row["sha256_ok"] = h.hexdigest() == entry["sha256"]
+        ok &= row.get("present", False) and row.get("size_ok", False) \
+            and row.get("sha256_ok", True)
+        results.append(row)
+        print(f"[verify] {row}")
 
     summary = {
         "ok": bool(ok),
         "shards": results,
         "total_train_tokens": manifest["total_train_tokens"],
         "total_val_tokens": manifest["total_val_tokens"],
+        "slice_pool_tokens": manifest.get("slice_pool_tokens", {}),
         "tokenizer": manifest["tokenizer"],
         "vocab_size": manifest["vocab_size"],
     }
     print(f"[verify] ok={summary['ok']}")
     return summary
+
+
+# ---------------------------------------------------------------------------
+# §7.2 retroactive sweep (PLAN.md: "First application is retroactive: the
+# Milestone 1 checkpoints are on the Modal volume waiting to be measured, which
+# also shakes the harness down before any result depends on it.")
+# ---------------------------------------------------------------------------
+
+@app.function(
+    gpu=SMOKE_GPU,          # eval-only; an L4 is plenty and cheapest
+    timeout=45 * 60,
+    volumes=VOLUMES,
+    secrets=SECRETS,
+    cpu=4.0,
+    memory=16384,
+    retries=0,
+)
+def register_sweep(run_id: str, checkpoint_every: int = 0,
+                   git_sha: str = _GIT_SHA, git_dirty: bool = _GIT_DIRTY) -> dict:
+    """Score every checkpoint of ``run_id`` under the §7.2 harness.
+
+    Loads each ckpt_*.pt (common files only; rank sidecars are optimizer
+    state, irrelevant to eval), runs evals.exemplar.evaluate, and appends
+    one JSONL row per checkpoint to <run_id>/register_eval.jsonl on the runs
+    Volume — the same file the in-training harness writes, so a swept curve
+    and a live curve are one artifact. Idempotent per checkpoint: rows are
+    keyed (step, eval_set_digest), and re-running a sweep overwrites nothing,
+    it appends; a later fetch de-dupes by step keeping the last row.
+
+    checkpoint_every=0 means all checkpoints; N means ckpt steps that are
+    multiples of N (a cheap stride for runs with dense checkpoints).
+
+    git_sha/git_dirty default to the LOCAL module globals — Modal re-imports
+    the module inside the container where `.git` does not exist, so the
+    default parameters (evaluated at def time, on the launching machine)
+    are the only correct source of the launcher's git identity.
+    """
+    import torch
+    import tiktoken
+    # cwd + sys.path FIRST: baseline_model / evals live in REPO_DIR, and the
+    # contamination guard + config import resolve via cwd — these imports
+    # must not precede the path setup (cost a real sweep launch 2026-09-27).
+    os.chdir(REPO_DIR)
+    sys.path.insert(0, REPO_DIR)
+    from baseline_model import GPT
+    from evals.exemplar import (
+        evaluate as evaluate_register,
+        eval_set_digest,
+        load_passages,
+        assert_clean,
+        append_jsonl,
+    )
+    from config import config
+
+    runs_vol.reload()
+    run_dir = Path(RUNS_MOUNT) / run_id
+    if not run_dir.is_dir():
+        raise FileNotFoundError(f"no such run directory on the runs volume: {run_dir}")
+    ckpts = sorted(
+        p for p in run_dir.glob("ckpt_*.pt")
+        if re.fullmatch(r"ckpt_\d+\.pt", p.name)
+    )
+    if checkpoint_every:
+        ckpts = [p for p in ckpts
+                 if int(re.fullmatch(r"ckpt_(\d+)\.pt", p.name).group(1)) % checkpoint_every == 0]
+    if not ckpts:
+        raise FileNotFoundError(f"no common checkpoints under {run_dir}")
+
+    device = torch.device("cuda")
+    enc = tiktoken.get_encoding(config.tokenizer_name)
+    exemplar_file = Path(REPO_DIR) / "evals" / "exemplar_data" / "register_exemplars.txt"
+    craft_file = Path(REPO_DIR) / "evals" / "exemplar_data" / "craft_essays.txt"
+
+    # Guard BEFORE scoring: a contaminated passage would sweep memorization
+    # into every curve this produces.
+    all_passages = load_passages(exemplar_file) + load_passages(craft_file)
+    assert_clean(all_passages, enc, "data/shards/gutenberg_train_*.bin")
+    digest = eval_set_digest([exemplar_file, craft_file])
+    print(f"[sweep] {len(all_passages)} passages clean, digest {digest}")
+
+    model = GPT(vocab_size=config.vocab_size, num_layers=config.num_layers,
+                model_dim=config.model_dim, head_dim=config.head_dim,
+                num_heads=config.num_heads).to(device)
+    model.eval()
+
+    out_path = run_dir / "register_eval.jsonl"
+    for ck in ckpts:
+        step = int(re.fullmatch(r"ckpt_(\d+)\.pt", ck.name).group(1))
+        payload = torch.load(ck, map_location=device, weights_only=True)
+        if payload.get("format", 1) < 3:
+            state = payload.get("model_state_dict") or payload.get("model")
+        else:
+            state = payload["model_state_dict"]
+        model.load_state_dict(state)
+        result = evaluate_register(
+            model, enc,
+            exemplar_file=exemplar_file,
+            craft_file=craft_file,
+            seq_len=config.seq_len,
+            device=device,
+        )
+        result.update({
+            "step": step,
+            "run_id": run_id,
+            "swept": True,           # distinguishes retroactive rows from live ones
+            "checkpoint": ck.name,
+            "eval_set_digest": result["eval_set_digest"],
+            # harness code provenance: sweep rows from different harness
+            # versions can share an eval_set_digest (the data files did not
+            # change when the scoring aggregate did), so the git identity of
+            # the harness code is what disambiguates them on the volume.
+            "harness_git_sha": git_sha,
+            "harness_git_dirty": git_dirty,
+        })
+        append_jsonl(out_path, result)
+        print(f"[sweep] {ck.name}: exemplar_ppl {result['exemplar_ppl_nats_per_tok']:.4f} "
+              f"mean_loss_gap {result['mean_loss_gap']:.4f} "
+              f"craft_ppl {result['craft_ppl_nats_per_tok']:.4f}")
+    runs_vol.commit()
+    return {"checkpoints": len(ckpts), "output": str(out_path),
+            "eval_set_digest": digest}
+
+
+@app.local_entrypoint()
+def sweep(run_id: str, checkpoint_every: int = 0,
+          git_sha: str = _GIT_SHA, git_dirty: bool = _GIT_DIRTY) -> None:
+    """CLI: modal run modal_app.py::sweep --run-id <uuid>"""
+    # git identity passed EXPLICITLY: register_sweep's parameter defaults
+    # re-evaluate in the container, where .git does not exist (measured
+    # 2026-09-27: rows landed with harness_git_sha=""). The local
+    # entrypoint runs on the launching machine, where _GIT_SHA is real —
+    # same argument-flow pattern as smoke()/train().
+    print(json.dumps(register_sweep.remote(run_id=run_id,
+                                           checkpoint_every=checkpoint_every,
+                                           git_sha=git_sha,
+                                           git_dirty=git_dirty),
+                     indent=2))
 
 
 # ---------------------------------------------------------------------------
@@ -898,6 +1069,27 @@ def collect_results(include_logs: bool = True) -> dict:
     if (root / "modal_provenance.jsonl").exists():
         wanted.append(root / "modal_provenance.jsonl")
     wanted += sorted(root.glob("*/samples.log"))
+    # §7.2 trajectories are small (one JSONL row per checkpoint) and are the
+    # axis ablations are scored on — always collect them. The on-volume file
+    # is append-only and can hold superseded rows for the same step (e.g. a
+    # re-sweep after a harness fix); de-duplicate by step keeping the LAST
+    # row, which is the sweep's documented idempotency contract.
+    deduped_register_eval: dict[str, str] = {}
+    for jf in sorted(root.glob("*/register_eval.jsonl")):
+        keep: dict[int, str] = {}
+        for line in jf.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                step = json.loads(line).get("step")
+            except json.JSONDecodeError:
+                continue
+            if isinstance(step, int):
+                keep[step] = line   # last row per step wins
+        if keep:
+            wanted.append(jf)
+            deduped_register_eval[str(jf)] = "\n".join(
+                keep[s] for s in sorted(keep)) + "\n"
     # Per-run records are the authoritative registry; index.jsonl loses rows when
     # runs execute concurrently. Always collect these.
     wanted += sorted(root.glob("*/run.json"))
@@ -911,7 +1103,11 @@ def collect_results(include_logs: bool = True) -> dict:
 
     out, total, skipped = {}, 0, []
     for p in wanted:
-        data = p.read_bytes()[:_TEXT_CAP]
+        # de-duped §7.2 trajectory: use the filtered text, not raw bytes
+        if str(p) in deduped_register_eval:
+            data = deduped_register_eval[str(p)].encode("utf-8")
+        else:
+            data = p.read_bytes()[:_TEXT_CAP]
         if total + len(data) > _TOTAL_CAP:
             skipped.append(str(p.relative_to(root)))
             continue
