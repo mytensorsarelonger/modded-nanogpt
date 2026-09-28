@@ -69,10 +69,21 @@ bug, not an improvement.
    200-book sample, then applied to 3,431 books; the borderline cases still need
    a human policy pass at the new scale. It drops 177 documents after dedup. Check
    `python data/quality_filter.py --report` output rather than the constants.
+6. **§7.2 harness (`evals/exemplar.py` + `baseline_model.py` + the wiring in
+   `train_baseline.py`).** The scoring math is the load-bearing part: windowed
+   EOT-anchored loss and the wrong-minus-target gap sign convention. The
+   contamination guard is the part most likely to bite later — its 12-token
+   threshold is a calibrated judgement (stock phrases below, mid-length borrows
+   above), and its two catches (Poe PoC via collected works; Lamb via Symons
+   21407) were both invisible at manifest level. The architecture extraction
+   into `baseline_model.py` must stay verbatim-identical to what
+   `train_baseline.py` imports — a diff there is a control-arm defect, not a
+   refactor.
 
 ## Skip these
 
-- Architecture in `train_baseline.py` (verbatim from the reference; see above).
+- Architecture in `baseline_model.py` (verbatim from the reference; see above —
+  extracted from train_baseline.py 2026-09-27, must not drift).
 - `data/download_gutenberg.py` fetch logic — exercised on 3,431 real downloads.
 - `data/shard_writer.py` — small, and has a round-trip test.
 - PLAN.md / CHANGELOG.md prose.

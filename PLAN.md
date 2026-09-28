@@ -14,7 +14,21 @@ build the exemplar/contrast-pair eval harness (§7.2). `kda_mini.py` (Milestone 
 proceeds in parallel, built around a swappable attention mixer with a SWA control
 arm (§4.1). Nothing is currently running and no compute is committed.
 
-**Last updated:** 2026-09-17 (see [CHANGELOG.md](CHANGELOG.md) for the run log;
+**Audited 2026-09-27 against field research through Sep 2026.** The plan's
+structure held — control-arm discipline, the seed-band gate, the three-job
+Phase 1, and the no-aesthetic-judge-RL prohibition all survived, and the last
+now has mechanistic backing (PRISM, Appendix B). Three load-bearing points
+moved and are folded in where they bite: the KDA-skeptic argument is now a
+paper, but in the *post-trained* regime, not ours (§4.1 f′); midtraining
+research says the register must be introduced *early*, not only upweighted in
+cooldown (§5.1.1, §4.2); and the §9 thinking-channel decision has empirical
+teeth — RLVR collapses low-resource CoT registers largely irreversibly, and
+our own Sep 2026 GRPO/Tinker runs measured reasoning blocks silently
+consuming whole completion budgets. `eerie_rl/` (2026-09-18) now prototypes
+RL_STRATEGY §5's tasks on Qwen3-8B with a baseline (§7.2). New citations in
+Appendix B.
+
+**Last updated:** 2026-09-27 (see [CHANGELOG.md](CHANGELOG.md) for the run log;
 [AGENTS.md](AGENTS.md) is the entry point for a new agent or harness)
 **Owner:** (you)
 
@@ -399,6 +413,24 @@ either. That claim attacks this project's second thesis (§1) head-on, and K3-mi
 at ablation scale is close to the cheapest credible testbed anyone could run for
 it: nobody will retrain K3 to check, but (f) vs (f′) costs one ablation run.
 
+*Update 2026-09-27:* the argument now exists as a paper — "Sliding-window beats
+linear attention" (arXiv 2608.28444): SWA-with-sinks matches or beats
+**post-trained** linear-attention models, 2–10× on long-context retrieval, and
+recommends switching to SWA for cheap inference. Read carefully, this *sharpens*
+(f) vs (f′) rather than settling it: their comparison is post-trained linear
+models, not trained-from-scratch hybrids; Kimi Linear (arXiv 2510.26692) shows
+the from-scratch hybrid beating full attention *including in RL scaling regimes*
+under matched recipes — the exact comparison our (f)/(f′) ablation runs at small
+scale. Two consequences: (1) the control arm stays, unchanged; (2) if (f′) ties
+or wins at our scale, that is now a *publishable interaction finding* (from-
+scratch KDA hybrid vs SWA hybrid under a matched from-scratch recipe at
+~300M active), not just a null result — the literature currently only has the
+post-trained half of that comparison. Related work (SWAX, ICLR 2026) adds a
+design note if (f′) is ever revisited: in SWA+RNN hybrids, *shorter* windows
+train the long-term memory better because the model cannot lean on local
+attention for long-range retrieval — window size for the SWA arm is a
+hyperparameter worth sweeping, not a constant.
+
 **Known confound, recorded now so the result doesn't get over-read later:** it is
 *not* actually "everything else the same." NoPE on the MLA layers works because
 KDA's recurrent gating carries position (§3.1); SWA has no such carrier, so the
@@ -565,6 +597,29 @@ Corollary for §4.2: the A/B/C mix ablation is under-specified as written. "60/4
 must state *whether the ratio is constant or scheduled*, or runs A/B/C are not
 comparable to each other or to anything later.
 
+*Update 2026-09-27 — the constant-vs-scheduled choice now has field evidence,
+and it favors scheduled-with-early-introduction.* "Midtraining Bridges
+Pretraining and Posttraining Distributions" (ICML 2026 oral) shows midtraining
+gains are largest exactly for domains *distant* from the general pretraining
+distribution — which the weird/eerie register is, definitionally — and that
+**time of introduction and mixture weight interact strongly**: early
+introduction tolerates high mixture weights, while late introduction requires
+lower ones, with data introduced late — outside a "plasticity window" — unable
+to be compensated by raising its mixture share later. PRISM (arXiv 2603.17074)
+adds the mechanism: midtraining restructures >90% of weights and is what makes
+later RL effective at all; RL itself refines only ~5% and preserves the
+midtrained geometry (>0.998 CKA). Two consequences for this plan:
+
+1. The register slice must be **present from the start**, at meaningful weight,
+   with cooldown *upweighting* it further (§4.3) — not introduced late. The
+   8.7%-from-the-start corpus we already have is the right shape; a
+   "general-first, register-in-cooldown-only" schedule is now the known-bad
+   arm, and worth having as such if A/B/C can afford it.
+2. §4.2 job 2 (deliberation-shaped text) gets the same treatment: the
+   craft-essay slice is thin, but its *early* presence at low weight is what
+   the plasticity-window finding predicts matters — upweighting it only in
+   cooldown cannot retroactively install the substrate RL needs.
+
 ### 5.1.2 What adding a slice actually costs
 
 *Added 2026-09-17, because this was folklore and Milestone 5 is three slices wide.*
@@ -601,10 +656,35 @@ defect Milestone 1's `mundane` probe actually measured, it needs no taste, and i
 download plus a manifest edit. The two Gutenberg-derived slices need a human with a
 catalogue, and that work does not parallelize with automation — it *is* §5.2.3.
 
+*Audit note 2026-09-27 on the paused EDU-vs-plain-FineWeb question
+(PAUSE-general-slice.md):* field evidence supports **EDU as the default**.
+FineWeb-Edu remains the standard quality-filtered web subset in small-model
+pretraining comparisons, and the newest refinement of it (Edu-QuRating, arXiv
+2609.09425) adds only ~+0.01 mean accuracy over a FineWeb-Edu baseline in matched
+single runs — i.e. the EDU-classifier step is where the quality signal is; further
+filtering is marginal. For this slice's stated job (syntactic and logical
+scaffolding + steerability, not benchmark scores), EDU at ~18% of the pool is
+defensible, and plain FineWeb would trade per-token quality for modern-register
+surface diversity that §5.3's register-rendering pipeline can generate far more
+cheaply and on-purpose. Decision is the owner's; the research does not block on
+more research.
+
 **Do not re-tokenize the existing corpus to add a slice.** Backbone and register
 shards are unchanged by a new slice arriving beside them; `tokenize_corpus.py` only
 needs to run over the *new* books, writing new per-slice shards. Re-running it wholesale
 invites a val-holdout reshuffle, which silently breaks comparability with Milestone 1.
+
+**Where the binary shards live, long-term: a private Hugging Face dataset repo.**
+The dev box has now accumulated >500 MB of shard directories (`finewebedu10B/` cache,
+`by_slice/` pool) that git must never absorb and the laptop must not be the only
+home of: `k3mini-shards` (the Volume) is authoritative *for a run*, but a
+versioned, checksummed, host-independent copy belongs in a private HF dataset
+(e.g. `keppy/k3mini-corpus`, one directory per slice, `manifest.json` alongside).
+That is the same reasoning as Modal's volume-upload design (§4.0.1): the
+`data/manifest.jsonl` + `data/shards/manifest.json` provenance in git defines the
+*recipe*, and the recipe must be able to regenerate — or re-download — the bytes
+from somewhere that is not this laptop. Not urgent; do it at the next corpus
+milestone, not before a run.
 
 ### 5.2 Sourcing order (deliberately: easiest first)
 
@@ -812,10 +892,27 @@ infrastructure. Four tracked quantities, wired into the checkpoint eval loop:
 4. Later: **restoration / continuation task accuracy at temperature** — the
    verifiable in-domain tasks of RL_STRATEGY.md §5. The generators need no new
    data; draft them from the existing corpus.
+   **Drafted 2026-09-18 — `eerie_rl/`** (Tinker LoRA RL on Qwen3-8B; judge-free
+   mechanical rewards: n-gram + word-overlap per task type, per RL_STRATEGY §5).
+   Baseline measured at temp 0, 18 cases: avg reward 0.052 — word overlap 0.096
+   (the learnable gradient: "use the same diction"), n-gram ~0.007 (the ceiling:
+   exact held-out reconstruction). This is the healthy direction: the thomas
+   GRPO work the same week showed the opposite failure — a case set the base
+   model is already at ceiling on yields zero advantage and zero learning
+   (reward 1.0, std 0). Two design constraints it confirms for the eventual
+   K3-mini version: budget/length control in the reward from day one, and
+   pass@k of the base recorded before any RL gain is claimed (RL_STRATEGY §3).
 
 **First application is retroactive:** the Milestone 1 checkpoints are on the
 Modal volume waiting to be measured, which also shakes the harness down before
-any result depends on it.
+any result depends on it. *Done 2026-09-27 — `register_sweep` over
+21c92807 (ckpt 1000/2000/3000/3250). Headline: the contrast-pair loss gap is
+NEGATIVE across the whole baseline curve (−0.35 → −0.41 nats/tok, deepening) —
+the general-text baseline prefers the mundane member of every pair over the
+register target, and training makes it more so. That number is the zero point
+mix ablations must move toward positive. The shake-down earned its keep: three
+real defects surfaced and were fixed (import-order in the sweep, exemplar-PPL
+aggregate semantics, `---` terminator handling in the loader).*
 
 ### 7.3 The rest of the stack
 
@@ -895,6 +992,41 @@ it is compute-side and touches no corpus.
   register. In-register deliberation (the model reasons like a 19th-c. critic) is
   more alien and on-thesis, and much harder to bootstrap. Prototype both on a small
   run during Phase 1; decide before any post-training work begins.
+
+  *Updated 2026-09-27 — this is no longer a taste call; three independent inputs
+  now bear on it, two from the field and one measured by us:*
+
+  1. **Cross-lingual Collapse (Park et al., arXiv 2506.05850):** under
+     verifiable-reward RL, chain-of-thought systematically collapses toward the
+     pretraining-dominant language as accuracy rises — negligible for
+     high-resource languages, *catastrophic and largely irreversible* for
+     low-resource ones (−97.6pp for Ukrainian within 250 updates), with
+     mitigations (language-consistency rewards, low-entropy decoding) costing a
+     measurable 5–10pp of accuracy. The weird/eerie register is structurally a
+     **low-resource register inside an English-dominant model**. A plain-English
+     thinking channel that we later run RL through is precisely the setup in
+     which deliberation drags toward dominant-register English — and register
+     bleeds across channels through shared weights. Consequence: if plain
+     English is chosen, a **register-consistency term or at minimum a
+     register-share diagnostic on the thinking tokens** must be wired in from
+     the first RL run, because drift observed after the fact cannot be cheaply
+     reversed. This measurably strengthens the in-register-deliberation option.
+  2. **Reasoning-block budget burn is a silent, live failure mode — measured by
+     us, twice.** bp-agent/prime-rl (Sep 2026): Qwen3.5-2B in thinking mode
+     spent the *entire* completion budget on reasoning blocks and emitted zero
+     visible output, for ~9 hours, while the GPU sat at 100% looking healthy.
+     thomas (Sep 2026): the thinking variant of Qwen3-4B was the wrong model
+     shape entirely — the non-thinking Instruct build terminates naturally
+     (mean 226 tokens, 0% clipped). Matches the field's move to explicit
+     **separate thinking/solution budgets with forced termination** (Elastic
+     Reasoning, ICLR 2026). Consequences, regardless of which register the
+     thinking channel uses: separate t/s budgets with forced termination;
+     zero-visible-output rollouts rejected at admission; "no admitted payload
+     after N units" treated as a kill signal, never a liveness signal.
+  3. **Prototype order unchanged, but the prototype must now measure:** the
+     in-register share of thinking tokens, the t/s budget split, and
+     visible-output admission rate — so the §2 decision is made on measured
+     drift and burn, not on vibes.
 - **Sparsity: 8-of-64 vs 8-of-128.** Higher sparsity is more faithful to K3 and more
   interesting as a claim; lower is easier to keep balanced and to debug. Note K3's own
   §2.3 says extreme sparsity is precisely what *forced* the RMSNorm, SiTU-GLU and QB
@@ -1041,6 +1173,41 @@ strategy, the post-training ladder, and the condensed field survey live in
   is why a 0% general-text slice leaves no expository mode. Follow its citations,
   not the paper, for method: Pythia (Biderman 2023), Tigges 2024 (circuit
   consistency across checkpoints), Li 2025 (hundreds of small models).
+- **Added 2026-09-27 (audit; folded into §4.1, §5.1.1, §5.1.2, §7.2, §9):**
+  - *PRISM: Demystifying Retention and Interaction in Mid-Training* (arXiv
+    2603.17074) — mechanistic backing for RL_STRATEGY's governing claim
+    ("RL-ability is determined at pretrain/midtrain time"): midtraining
+    restructures >90% of weights; RL refines ~5%, front-loaded, and preserves
+    the midtrained geometry (>0.998 CKA); data composition matters most at
+    midtraining, not in the RL mix.
+  - *Midtraining Bridges Pretraining and Posttraining Distributions* (ICML 2026
+    oral) — distributional bridging; plasticity window; early-vs-late
+    introduction × mixture-weight interaction. Drives the §5.1.1 schedule
+    decision.
+  - *Cross-lingual Collapse in Chain-of-Thought* (Park et al., arXiv
+    2506.05850) — RLVR collapses low-resource CoT registers, largely
+    irreversibly; consistency rewards cost accuracy. Drives the §9
+    thinking-channel update.
+  - *Sliding-window beats linear attention* (arXiv 2608.28444) — the Aug 2026
+    KDA-skeptic argument, now a paper; note it compares against *post-trained*
+    linear attention. See §4.1 f′.
+  - *Kimi Linear* (arXiv 2510.26692, v2) — the from-scratch hybrid beats full
+    MLA *including RL scaling regimes* under matched recipes; the claim our
+    (f) arm tests at small scale.
+  - *Short Window Attention Enables Long-term Memory* (SWAX, arXiv 2509.24552,
+    ICLR 2026) — in hybrids, shorter windows train long-term memory better;
+    stochastic window-size training. A design note for the f′ arm.
+  - *Scalable Chain of Thoughts via Elastic Reasoning* (ICLR 2026) — explicit
+    separate thinking/solution budgets with forced termination. Drives §9.
+  - *Rubric Curriculum RL* (ICML 2026), *Writing-Zero*, *ACE-RL* (surveyed in
+    arXiv 2606.08625) — creative-writing RL matured into exactly the shape
+    RL_STRATEGY §5 chose: structural/verifiable rewards first, pairwise +
+    curriculum against hacking; absolute-score baselines "plateau or collapse
+    within a few hundred steps," which is the mode-collapse warning with
+    numbers on it. RL_STRATEGY's §1 prohibition stands.
+  - *Edu-QuRating* (arXiv 2609.09425) — quality-dimension filtering over
+    FineWeb-Edu adds only ~+0.01 mean accuracy in matched small-model runs;
+    informs the §5.1.2 EDU-vs-plain decision.
 
 **Code**
 - **`records/track_3_optimization/train_gpt_simple.py`** — the blueprint (§3.5). In

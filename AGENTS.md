@@ -92,10 +92,13 @@ and not eerie, and the `mundane` probe collapsed into repetition — that is the
 general-text gap, measured.
 
 **Next, in order:** source the missing slices (PLAN.md §5.1, mechanics and
-hand-vs-automation split in **§5.1.2**), then the §7.2 exemplar/contrast-pair eval
-harness. Both are CPU-only. `kda_mini.py` (Milestone 2) is compute-side and runs in
-parallel. Do not launch a mix ablation before §7.2 exists — its curves cannot be
-scored on the axis that matters.
+hand-vs-automation split in **§5.1.2**), then ~~the §7.2 exemplar/contrast-pair
+eval harness~~ — **built 2026-09-27** (`evals/exemplar.py`, wired into the
+checkpoint eval loop; retroactive M1 sweep via `modal run modal_app.py::sweep`).
+Both remaining corpus work and `kda_mini.py` (Milestone 2) are compute-side
+and run in parallel. The §7.2 gate on mix ablations is now LIFTED — a mix
+run's curves can be scored on the axis that matters as long as it trains
+with the harness wired in.
 
 ## Traps that have already cost time
 

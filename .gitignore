@@ -7,8 +7,14 @@ logs/
 # --- Corpus: large, regenerable from manifest.jsonl. Never commit. ---
 # At 3k books this is ~2.4 GB of text and ~1.2 GB of binary shards; at the full
 # English Gutenberg catalogue ~72 GB. Committing it bloats history permanently.
+# Durable home for the binary shards: a private HF dataset repo (PLAN.md §5.1.2),
+# NOT git. The finewebedu10B/ variant is listed separately because the
+# `fineweb10B/` pattern above does not match it (near-miss, caught 2026-09-27).
 data/gutenberg/
 data/shards*/*.bin
+data/fineweb10B/
+data/finewebedu10B/
+data/finewebedu100B/
 # Per-slice shards for the mixing dataloader live one level deeper. The rule
 # above uses a single `*`, which does NOT cross a directory separator, so these
 # 882 MB were untracked-but-not-ignored -- one `git add -A` from entering history.

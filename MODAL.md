@@ -18,6 +18,10 @@ launcher retains a local source check for that exact regression and now also:
 - ships both imported helper modules (`probes.py` and `training_state.py`); and
 - forwards `GIT_SHA`/`GIT_DIRTY`, so the trainer's run registry records the
   checkout provenance even though the image intentionally contains no `.git`.
+- **Run the Modal CLI as `PYTHONPATH= modal ...` from an agent session.** A
+  Hermes shell exports a `PYTHONPATH` whose `watchfiles` shadows the one the
+  CLI needs, and `modal` fails at import. Empty it for the invocation; nothing
+  in the launcher depends on the session's path.
 
 The runtime is pinned to **PyTorch 2.13.0** on Linux and Windows. PyTorch 2.10
 is not a valid fallback: its compiled graph produced non-finite weights on the
@@ -333,8 +337,33 @@ runs/                              <- k3mini-runs volume
   <run_id>/ckpt_NNNNN.pt           ~1.4 GB each
   <run_id>/ckpt_NNNNN.rankRRRRR.pt rank-local Muon/RNG resume state
   <run_id>/samples.log             the primary instrument (PLAN.md §7.1)
+  <run_id>/register_eval.jsonl     the §7.2 trajectory: one row per checkpoint
   _logs/<uuid>.txt                 what train_baseline.py writes to logs/
 ```
+
+### §7.2 retroactive sweep over an existing run
+
+`register_eval.jsonl` is written live during training (every
+`REGISTER_EVERY` steps, default = checkpoint cadence). For runs that trained
+before the harness existed — the Milestone 1 baseline — the same curve is
+produced retroactively from the checkpoints already on the volume:
+
+```powershell
+modal run modal_app.py::sweep --run-id 21c92807-418e-49ce-a78b-566b376f0914
+# stride for dense-checkpoint runs:
+modal run modal_app.py::sweep --run-id <uuid> --checkpoint-every 500
+```
+
+Runs on an L4 (eval-only, no training): loads each `ckpt_*.pt`, runs the
+contamination guard first (same guard as the trainer's startup), scores
+exemplar PPL / contrast-pair gap / craft PPL, appends one JSONL row per
+checkpoint marked `"swept": true` with the harness git identity
+(`harness_git_sha` — rows from different harness versions can share an
+`eval_set_digest`, so the git SHA is what disambiguates them on the volume).
+`fetch` returns the trajectory de-duplicated per step (last row wins, the
+sweep's idempotency contract). Cost: minutes; the guard is the slow part
+(~4 min over the full corpus).
+
 
 `logs/` inside the container is a **symlink** into `runs/_logs` on the volume.
 `train_baseline.py` does `os.makedirs("logs")` in CWD and writes there; without

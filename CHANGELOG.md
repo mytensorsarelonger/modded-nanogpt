@@ -10,6 +10,142 @@ from the code alone.
 
 ---
 
+## 2026-09-27 — §7.2 exemplar/contrast-pair harness built and wired
+
+PLAN.md §7.2 called this "wiring, not infrastructure" — the preconditions
+(dense checkpoints, run registry) existed; what was missing was the axis every
+future mix ablation gets scored on. Built against one measured failure and
+two near-misses:
+
+- **`evals/exemplar.py`** — the harness. Three tracked quantities under every
+  checkpoint: hand-written-exemplar perplexity, contrast-pair loss gap
+  (wrong-minus-target nats/token; widening = the mix works), craft-essay
+  perplexity tracked separately (§4.2 job 2). Loss is EOT-anchored windowed,
+  the exact shape training uses — a whole-text loss weights early-token
+  conditioning differently and would not be comparable to val_loss. Per-passage
+  numbers land in `register_eval.jsonl`; aggregates are computed over them.
+- **The contamination guard is part of the harness, not a one-off check.**
+  It tokenizes every eval passage and searches the training shards for exact
+  12-token matches at any offset (packed-lane binary search, one shard-index
+  build shared across passages). Why token-level and not manifest-level:
+  *measured twice, same day*. Poe's "Philosophy of Composition" is in-train
+  via collected-works editions (10031, 76996) while the standalone book
+  (55749) was deduped out; and Lamb's "Detached Thoughts" — chosen
+  specifically because the manifest has zero Lamb entries — is quoted at
+  length by Symons's "Figures of Several Centuries" (21407, trained): 13
+  twelve-token hits. Both would have scored memorization as register
+  affinity. The guard runs at trainer startup, before paid time, and in the
+  sweep before any curve is produced.
+- **Craft passages shipped**: Hazlitt "On the Pleasure of Painting" + "On
+  Familiar Style" (PG 3020), Pater "Style" (PG 4037) — all author-absent
+  AND 0 twelve-token hits against the shards. Register exemplars ship as
+  marked PROVISIONAL seeds: §7.2's design says the owner's hand writing is
+  the eval set; seeds exist so the harness runs end to end today and the
+  swap is a text-file edit, not a code change.
+- **`baseline_model.py`** — GPT extracted from train_baseline.py so
+  the retroactive sweep can build a model without launching a training run
+  (train_baseline trains at import time). One definition, two consumers; a
+  second copy of the architecture would drift from the control arm silently.
+- **Wiring** — `REGISTER_EVERY` (default = checkpoint cadence, 0 disables);
+  eval fires on the checkpoint cadence after the checkpoint is durable;
+  resume copies `register_eval.jsonl` through the resume step (new
+  `copy_jsonl_through_step`); run registry records `register_eval_log` /
+  `register_every` / `eval_set_digest`; `register_every` participates in
+  `config_hash()`. Modal ships the new files, `sweep` entrypoint scores
+  every checkpoint of a run on the volume into the same file, `fetch`
+  collects the trajectories. 18 new tests (33 total in the touched modules).
+
+**Verified**: smoke 2026-09-27 (`fb612388-0994-4809-b9d0-22ae55230427`, 12 steps,
+L4): guard clean in-container (7 passages, digest 1e618cc9d92c7619), register
+eval fired at step 6 on the checkpoint cadence — exemplar_ppl 6.2597,
+mean_loss_gap −0.0320, craft_ppl 6.6347 — appended to `register_eval.jsonl`,
+run record + index updated, exit 0. First bug caught by the smoke round-trip:
+`register_sweep` imported `baseline_model` before its `sys.path` setup —
+imports now precede nothing, and the sweep was relaunched after the fix.
+
+Two more defects the first retroactive M1 sweep exposed, both fixed same day:
+- `register_sweep` computed the headline exemplar PPL over pair targets AND
+  contrast members, diluting the register signal with the mundane side —
+  §7.2 quantity 1 is targets only. Fixed; a regression test
+  (`EvaluateSemanticsTests`) locks the semantics with a content-dependent
+  loss model, which also caught:
+- the loader scored `---` separator lines as passage text whenever an owner
+  edits the eval file in the *documented* format. The shipped passages were
+  blank-line separated, so no shipped number was affected; the loader now
+  honours the documented terminator.
+- sweep rows carry `harness_git_sha`/`harness_git_dirty` (rows from different
+  harness versions can share an eval_set_digest, so git identity is the
+  disambiguator). First attempt read the module globals inside the function
+  — but Modal re-imports the module in the container where `.git` does not
+  exist, so the fields landed empty; the local `sweep` entrypoint now passes
+  them explicitly, the same argument-flow pattern `smoke`/`train` already
+  used. (Same trap as `LOCAL_ROOT`-relative paths: anything resolved at
+  container import time must be baked by the launcher.)
+
+**M1 retroactive curve** (baseline, general-text mix, 3250 steps — the zero
+point every mix ablation must move):
+
+| step | exemplar_ppl (targets) | mean_loss_gap | craft_ppl |
+|------|------------------------|---------------|-----------|
+| 1000 | 4.7047 | −0.3545 | 4.4835 |
+| 2000 | 4.6132 | −0.3924 | 4.3698 |
+| 3000 | 4.5892 | −0.4119 | 4.2984 |
+| 3250 | 4.5021 | −0.3855 | 4.2791 |
+
+The gap is NEGATIVE throughout: the general-text baseline assigns higher
+likelihood to the mundane contrast member than to the register exemplar,
+and the trend across training deepens the wrong-way preference (−0.35 →
+−0.41). This is the numeric statement of the problem the register mix is
+supposed to fix, measured before any register token is added — the exact
+retroactive baseline §7.2 asked for.
+
+---
+
+## 2026-09-27 — PLAN.md audited against Sep 2026 field research
+
+No code changed; plan surgery only, in the plan's own dated-amendment style.
+The audit's verdict: the plan held. Control-arm discipline, the seed-band gate,
+the three-job Phase 1, and the no-aesthetic-judge-RL prohibition all survived —
+and the last now has mechanistic backing (PRISM: midtraining restructures >90%
+of weights; RL refines ~5% and only succeeds on midtrained models). Four
+regions were updated for recency:
+
+- **§4.1 (f′)** — the Aug 2026 KDA-skeptic argument crystallized as arXiv
+  2608.28444, but its claim covers *post-trained* linear attention, not
+  trained-from-scratch hybrids; Kimi Linear claims the from-scratch hybrid
+  beats full MLA *including in RL scaling regimes*. The control arm stands,
+  and either outcome is now a publishable small-scale data point. SWA
+  window-size named as a second confound beside NoPE/RoPE (SWAX, ICLR 2026).
+- **§5.1.1/§4.2** — midtraining research (ICML 2026 oral; PRISM) says data
+  introduced late, outside a plasticity window, cannot be compensated by
+  raising its mixture share. Consequence: the register (and craft-essay)
+  slices must be present from the start with cooldown *upweighting* — not
+  introduced late. A/B/C gains a scheduled arm; "register-in-cooldown-only"
+  is now the known-bad arm.
+- **§9 thinking-channel** — the biggest update. Cross-lingual collapse under
+  RLVR (Park et al., arXiv 2506.05850) shows low-resource CoT registers
+  collapse largely irreversibly — and the weird/eerie register is exactly a
+  low-resource register in an English-dominant model. Plus our own measured
+  reasoning-block budget burn (bp-agent: thinking mode consumed the entire
+  completion budget with zero visible output for ~9h at 100% GPU; thomas: the
+  thinking variant was the wrong model shape). Separate t/s budgets with
+  forced termination, zero-output admission gates, and a register-share
+  diagnostic on thinking tokens are now mandatory design parts, whichever
+  channel register wins.
+- **§5.1.2** — audit note on the paused EDU-vs-plain question: field evidence
+  (Edu-QuRating, arXiv 2609.09425) supports EDU as the default; the decision
+  does not block on more research.
+- **§7.2** — eerie_rl (2026-09-18) recorded as the drafted RL_STRATEGY §5
+  task generator with its Qwen3-8B baseline: word-overlap 0.096 is the
+  learnable gradient, n-gram ~0.007 the ceiling — the healthy direction
+  (thomas the same week showed the ceiling case: zero advantage, zero
+  learning).
+
+New citations batched in Appendix B. RL_STRATEGY.md left untouched — it is a
+verbatim handoff by design; PLAN.md remains the single living intent doc.
+
+---
+
 ## 2026-09-17 — docs brought current; `AGENTS.md` added
 
 No behaviour change. Project resumed after a ~4-week gap; the docs had drifted
@@ -692,8 +828,11 @@ is now corpus and measurement, not code.*
 - **Register slice is 8.7%**, below §5.1's 10–25% band. Needs more *tokens*, not
   more weight — upweighting buys repetition (mix-c is ~26 epochs over 371 books).
 - **Craft-essay slice is 0%**, added 2026-08-13 as Phase 1 job 2.
-- **§7.2 exemplar/contrast-pair harness unbuilt**, and time-sensitive: ablations
-  that train before it exists cannot be scored on the axis the project cares about.
+- ~~**§7.2 exemplar/contrast-pair harness unbuilt**~~ — **built 2026-09-27**
+  (`evals/exemplar.py`, wired into the checkpoint loop; M1 retroactive sweep
+  run same day). The eval-set caveat that remains: register exemplars are
+  marked PROVISIONAL seeds pending the owner's hand writing — the numeric
+  axis exists, but its zero point is agent-written until they're replaced.
 - ~~Mixing dataloader unbuilt~~ — **landed 2026-08-09**, realised 0.8001/0.1999
   against a 0.800/0.200 target.
 - ~~Seed band unknown~~ — **measured 2026-08-19** at 1,000 steps (range 0.00198).
