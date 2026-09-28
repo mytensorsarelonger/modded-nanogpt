@@ -6,6 +6,7 @@ rules can be tested without importing (and therefore launching) the trainer.
 
 from __future__ import annotations
 
+import json
 import math
 import re
 from pathlib import Path
@@ -35,6 +36,7 @@ def effective_training_overrides(
     world_size: int,
     torch_version: str,
     torch_cuda_version: str | None,
+    register_every: int = 0,
 ) -> dict:
     """Return every effective runtime value that identifies a trajectory.
 
@@ -58,6 +60,11 @@ def effective_training_overrides(
         "world_size": world_size,
         "torch_version": torch_version,
         "torch_cuda_version": torch_cuda_version,
+        # §7.2 register-eval cadence. The eval itself is under no_grad and
+        # consumes no RNG, so it cannot alter the trajectory — but it IS the
+        # axis an ablation is scored on, so a run that measured register
+        # affinity and one that did not must not collide on identity.
+        "register_every": register_every,
     }
 
 
@@ -220,3 +227,31 @@ def copy_sample_log_through_step(source: Path, destination: Path, step: int) -> 
 
     destination.write_text(text[:cutoff], encoding="utf-8")
     return kept_blocks
+
+
+def copy_jsonl_through_step(source: Path, destination: Path, step: int,
+                            step_key: str = "step") -> int:
+    """Copy a step-labelled JSONL trajectory through ``step``.
+
+    Same resume discipline as copy_sample_log_through_step, for §7.2's
+    register_eval.jsonl: a resumed run continues the trajectory instead of
+    starting a second one. Malformed lines abort rather than being skipped --
+    a half-written line means a commit raced a crash, and silently truncating
+    a measurement file is the exact failure mode the run.json-over-index.jsonl
+    decision exists to prevent.
+    """
+    if not source.exists():
+        return 0
+    kept = 0
+    with open(destination, "w", encoding="utf-8") as out:
+        with open(source, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                record = json.loads(line)
+                if record[step_key] > step:
+                    continue
+                out.write(json.dumps(record, allow_nan=False) + "\n")
+                kept += 1
+    return kept

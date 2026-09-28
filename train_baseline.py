@@ -30,9 +30,19 @@ import tiktoken
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import config, config_hash, manifest_hash, validate_against_shards
 import probes
+import baseline_model
+from baseline_model import GPT  # one definition, two consumers (see baseline_model.py)
+from evals.exemplar import (
+    assert_clean,
+    evaluate as evaluate_register,
+    eval_set_digest,
+    load_passages,
+    append_jsonl,
+)
 from training_state import (
     checkpoint_sidecar_path,
     completion_metadata,
+    copy_jsonl_through_step,
     copy_sample_log_through_step,
     distributed_batch_granule,
     effective_training_overrides,
@@ -120,124 +130,15 @@ def distributed_data_generator(filename_pattern: str, batch_size: int, seq_len=1
 ########################################
 #             Architecture             #
 ########################################
+# GPT and its submodules live in baseline_model.py, extracted from here
+# (2026-09-27; behavior-identical — two type annotations dropped, see that
+# module's docstring): the §7.2 exemplar/contrast-pair harness needs to build
+# the model without launching a training run (retroactive sweeps over
+# checkpoints on the runs Volume), and a second copy of the architecture would
+# drift from the control arm silently. Import order keeps the run log honest:
+# one definition, two consumers.
 
-class RMSNorm(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.gains = nn.Parameter(torch.ones(dim))
-
-    def forward(self, x):
-        return F.rms_norm(x, (x.size(-1),), weight=self.gains.type_as(x))
-
-class Linear(nn.Linear):
-    def __init__(self, in_features, out_features):
-        super().__init__(in_features, out_features, bias=True)
-
-    def forward(self, x):
-        return F.linear(x, self.weight.type_as(x), self.bias.type_as(x))
-
-class Rotary(nn.Module):
-    def __init__(self, dim: int):
-        super().__init__()
-        # half-truncate RoPE (w/ base freq tuning)
-        angular_freq = (1 / 1024) ** torch.linspace(0, 1, steps=dim//4, dtype=torch.float32)
-        self.register_buffer("angular_freq", torch.cat([angular_freq, angular_freq.new_zeros(dim//4)]))
-
-    def forward(self, x_BTHD: Tensor):
-        pos = torch.arange(x_BTHD.size(1), dtype=torch.float32, device=x_BTHD.device)
-        theta = torch.outer(pos, self.angular_freq)[None, :, None, :]
-        cos, sin = theta.cos(), theta.sin()
-        x1, x2 = x_BTHD.to(dtype=torch.float32).chunk(2, dim=-1)
-        y1 = x1 * cos + x2 * sin
-        y2 = x1 * (-sin) + x2 * cos
-        return torch.cat((y1, y2), 3).type_as(x_BTHD)
-
-class CausalSelfAttention(nn.Module):
-    def __init__(self, dim: int, head_dim=128, num_heads=None):
-        super().__init__()
-        inferred_heads = dim // head_dim
-        self.num_heads = inferred_heads if num_heads is None else num_heads
-        self.head_dim = head_dim
-        hdim = self.num_heads * self.head_dim
-        assert hdim == dim, (
-            f"num_heads*head_dim must equal model_dim ({self.num_heads}*"
-            f"{self.head_dim} != {dim})"
-        )
-        self.q = Linear(dim, hdim)
-        self.k = Linear(dim, hdim)
-        self.v = Linear(dim, hdim)
-        self.proj = Linear(hdim, dim)
-        self.rotary = Rotary(head_dim)
-
-    def forward(self, x: Tensor):
-        B, T = x.size(0), x.size(1)
-        q = self.q(x).view(B, T, self.num_heads, self.head_dim)
-        k = self.k(x).view(B, T, self.num_heads, self.head_dim)
-        v = self.v(x).view(B, T, self.num_heads, self.head_dim)
-        q, k = F.rms_norm(q, (q.size(-1),)), F.rms_norm(k, (k.size(-1),))
-        q, k = self.rotary(q), self.rotary(k)
-        y = F.scaled_dot_product_attention(q.transpose(1, 2), k.transpose(1, 2),
-                                           v.transpose(1, 2), scale=0.12, is_causal=True).transpose(1, 2)
-        y = y.contiguous().view(B, T, self.num_heads * self.head_dim)
-        y = self.proj(y)
-        return y
-
-class MLP(nn.Module):
-    def __init__(self, dim: int):
-        super().__init__()
-        hdim = 4 * dim
-        self.fc = Linear(dim, hdim)
-        self.proj = Linear(hdim, dim)
-
-    def forward(self, x: Tensor):
-        x = self.fc(x)
-        x = x.relu().square()
-        x = self.proj(x)
-        return x
-
-class Block(nn.Module):
-    def __init__(self, dim: int, head_dim=128, num_heads=None):
-        super().__init__()
-        self.attn = CausalSelfAttention(dim, head_dim=head_dim, num_heads=num_heads)
-        self.mlp = MLP(dim)
-        self.norm1 = RMSNorm(dim)
-        self.norm2 = RMSNorm(dim)
-
-    def forward(self, x: Tensor):
-        x = x + self.attn(self.norm1(x))
-        x = x + self.mlp(self.norm2(x))
-        return x
-
-class GPT(nn.Module):
-    def __init__(self, vocab_size: int, num_layers: int, model_dim: int,
-                 head_dim: int = 128, num_heads: int | None = None):
-        super().__init__()
-        self.embed = nn.Embedding(vocab_size, model_dim).bfloat16()
-        self.blocks = nn.ModuleList([
-            Block(model_dim, head_dim=head_dim, num_heads=num_heads)
-            for _ in range(num_layers)
-        ])
-        self.proj = Linear(model_dim, vocab_size)
-        self.norm1 = RMSNorm(model_dim)
-        self.norm2 = RMSNorm(model_dim)
-
-    def forward(self, inputs: Tensor, targets: Tensor):
-        x = self.norm1(self.embed(inputs))
-        for block in self.blocks:
-            x = block(x)
-        logits = self.proj(self.norm2(x)).float()
-        logits = 15 * logits * (logits.square() + 15**2).rsqrt()
-        return F.cross_entropy(logits.view(targets.numel(), -1), targets.view(-1), reduction="sum")
-
-    @torch.no_grad()
-    def forward_logits(self, inputs: Tensor):
-        """Forward pass returning logits (for sampling)."""
-        x = self.norm1(self.embed(inputs))
-        for block in self.blocks:
-            x = block(x)
-        logits = self.proj(self.norm2(x)).float()
-        logits = 15 * logits * (logits.square() + 15**2).rsqrt()
-        return logits
+GPT = baseline_model.GPT  # noqa: F811  (re-exported for the module's own use below)
 
 
 ########################################
@@ -445,6 +346,9 @@ for _ in range(num_trials):
     stop_after = int(os.environ.get("STOP_AFTER", 0))
     sample_every = int(os.environ.get("SAMPLE_EVERY", config.sample_every))
     checkpoint_every = int(os.environ.get("CHECKPOINT_EVERY", config.checkpoint_every))
+    # §7.2 register-eval cadence; 0 disables. Default matched to the checkpoint
+    # cadence because PLAN.md §7.2 wires it into the checkpoint eval loop.
+    register_every = int(os.environ.get("REGISTER_EVERY", config.checkpoint_every))
     adamw_fused = os.environ.get("ADAMW_FUSED", "1") == "1"
 
     # initialize model parameters
@@ -540,6 +444,7 @@ for _ in range(num_trials):
         # bit-exact continuation even when every model hyperparameter matches.
         torch_version=torch.__version__,
         torch_cuda_version=torch.version.cuda,
+        register_every=register_every,
     )
     cfg_hash = config_hash(effective_overrides)[:16]
     data_hash = (manifest_hash() or "unknown")[:16]
@@ -768,6 +673,63 @@ for _ in range(num_trials):
     # --- Sampling ---
     sample_log_path = ckpt_dir / "samples.log"
 
+    # --- §7.2 exemplar / contrast-pair harness ---
+    # The register eval runs on the CHECKPOINT cadence (PLAN.md §7.2: "wired
+    # into the checkpoint eval loop"), alongside the probe suite, not inside
+    # the validation block: it measures a different thing (register affinity
+    # vs. corpus loss) and its cost must not be confused with val wall-clock.
+    # register_every itself (env: REGISTER_EVERY, 0 disables) is defined with
+    # the other env knobs above, where config_hash() can see it.
+    register_eval_path = ckpt_dir / "register_eval.jsonl"
+    exemplar_file = Path(__file__).resolve().parent / "evals" / "exemplar_data" / "register_exemplars.txt"
+    craft_file = Path(__file__).resolve().parent / "evals" / "exemplar_data" / "craft_essays.txt"
+
+    # Contamination guard: fail BEFORE any paid time, not at the first eval.
+    # A passage pasted from a corpus book scores memorization as register
+    # affinity; the Philosophy of Composition proved manifest-level absence
+    # is not evidence of corpus-level absence (it entered training via
+    # collected-works editions while the standalone book was deduped out).
+    if register_every and dist.get_rank() == 0:
+        all_passages = load_passages(exemplar_file) + load_passages(craft_file)
+        assert_clean(all_passages, enc, "data/shards/gutenberg_train_*.bin")
+        print0(f"[register] contamination guard: {len(all_passages)} passages clean "
+               f"(digest {eval_set_digest([exemplar_file, craft_file])})", console=True)
+
+    def register_eval(model, enc, step):
+        """One §7.2 read-out appended to register_eval.jsonl (rank 0 only).
+
+        Per-passage numbers are kept, not just aggregates: a single mean
+        exemplar PPL hides the mundane/cold-open split that §7.1 established
+        matters, and per-passage losses make any later re-aggregation free.
+        """
+        if dist.get_rank() != 0 or not register_every:
+            return
+        result = evaluate_register(
+            model, enc,
+            exemplar_file=exemplar_file,
+            craft_file=craft_file,
+            seq_len=config.seq_len,
+            device=device,
+        )
+        result.update({
+            "step": step,
+            "run_id": run_id,
+            "config_hash": cfg_hash,
+            "eval_set_digest": result["eval_set_digest"],
+        })
+        append_jsonl(register_eval_path, result)
+        tracker.log({
+            "register/exemplar_ppl": result["exemplar_ppl_nats_per_tok"],
+            "register/mean_loss_gap": result["mean_loss_gap"],
+            "register/craft_ppl": result["craft_ppl_nats_per_tok"],
+        }, step=step)
+        print0(f"[register] step {step}: exemplar_ppl "
+               f"{result['exemplar_ppl_nats_per_tok']:.4f} "
+               f"mean_loss_gap {result['mean_loss_gap']:.4f} "
+               f"craft_ppl {result['craft_ppl_nats_per_tok']:.4f} "
+               f"-> {register_eval_path.name}", console=True)
+
+
     # vocab_size is padded to a multiple of 128 (50304) but the tokenizer only
     # defines 50257 ids. The model can and does sample into the padding, which
     # tiktoken cannot decode ("Invalid token for decoding: 50274"). Mask the pad
@@ -875,6 +837,17 @@ for _ in range(num_trials):
                 f"{start_step} from {prior_sample_log}",
                 console=True,
             )
+            # §7.2 trajectory, same resume discipline as the sample log.
+            prior_register = ck_path.parent / "register_eval.jsonl"
+            copied_reg = copy_jsonl_through_step(
+                prior_register, register_eval_path, start_step
+            )
+            if copied_reg:
+                print0(
+                    f"Copied {copied_reg} prior register-eval row(s) through "
+                    f"step {start_step} from {prior_register}",
+                    console=True,
+                )
         dist.barrier()
         run_entry["resumed_from"] = str(ck_path)
         run_entry["resume_step"] = start_step
@@ -1035,6 +1008,12 @@ for _ in range(num_trials):
             if step % checkpoint_every == 0:
                 save_checkpoint(model, step, optimizers, loader_pos)
                 did_extra = True
+            # §7.2 register eval: same cadence as checkpoints, after the
+            # checkpoint is durable so a swept curve is never ahead of its
+            # weights on disk.
+            if register_every and step % register_every == 0:
+                register_eval(model, enc, step)
+                did_extra = True
             if did_extra:
                 dist.barrier()
                 t0 += time.perf_counter() - _extra_t0
@@ -1081,6 +1060,11 @@ if _rank == 0:
     run_entry["train_time_s"] = round(training_time, 2)
     run_entry["stop_after_requested"] = stop_after or None
     run_entry["sample_log"] = str(sample_log_path)
+    run_entry["register_eval_log"] = str(register_eval_path) if register_every else None
+    run_entry["register_every"] = register_every or None
+    run_entry["eval_set_digest"] = (
+        eval_set_digest([exemplar_file, craft_file]) if register_every else None
+    )
     # The direct test of resume correctness: an interrupted run and an
     # uninterrupted one must finish at the SAME corpus position. Loss agreement
     # implies it, but this states it outright and survives in the registry.

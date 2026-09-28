@@ -1,0 +1,150 @@
+# Craft essays — held-out exemplars (§7.2 quantity 3)
+
+Status: REAL, verified corpus-absent (2026-09-27). Each passage below was
+checked against the *training token stream*, not just data/manifest.jsonl —
+the manifest says Hazlitt and Lamb have zero downloads, but the Philosophy of
+Composition taught us that manifest-level absence is not evidence of
+corpus-level absence: it entered training via collected-works editions
+(10031, 76996) while the standalone book (55749) was deduped out. The
+contamination guard in evals/exemplar.py re-checks every passage against the
+shards at run time; these passages are the ones it passed.
+
+What this slice is (PLAN.md §4.2 job 2, RL_STRATEGY §2): deliberation-shaped
+text — prefaces, craft essays, criticism, writers on writing. There is no
+natural "author thinks aloud, then writes" corpus; this is the nearest
+in-register analogue, and §7.2 tracks its perplexity SEPARATELY from register
+prose so the eventual deliberation slice's effect on it is visible.
+
+Sources (public domain, Project Gutenberg):
+- Hazlitt, "On the Pleasure of Painting" and "On Familiar Style",
+  Table-Talk (PG 3020)
+- Pater, "Style", Appreciations (PG 4037)
+
+The Lamb "Detached Thoughts on Books and Reading" passage was here first and
+was REMOVED 2026-09-27: the contamination guard found 13 twelve-token
+matches — Symons's "Figures of Several Centuries" (21407, in the training
+corpus) quotes the essay at length, so scoring it would have measured
+memorization. That is the exact failure the guard exists for, caught by the
+guard and not by the manifest (zero "Lamb, Charles" entries). Pater's "Style"
+replaces it: author-absent from the manifest AND 0 twelve-token hits against
+the shards, verified 2026-09-27.
+
+Text below is verbatim PG transcription with hard line wraps reflowed to
+match the corpus's cleaned text (the tokenize pipeline's `strip` step joins
+hard-wrapped lines). The contamination guard tokenizes with the same gpt2
+encoder and searches the shards, so formatting drift here would surface as a
+guard hit, not a silent score change.
+
+## hazlitt_pleasure_of_painting
+
+There is a pleasure in painting which none but painters know. In writing, you
+have to contend with the world; in painting, you have only to carry on a
+friendly strife with Nature. You sit down to your task, and are happy. From
+the moment that you take up the pencil, and look Nature in the face, you are
+at peace with your own heart. No angry passions rise to disturb the silent
+progress of the work, to shake the hand, or dim the brow: no irritable humours
+are set afloat: you have no absurd opinions to combat, no point to strain, no
+adversary to crush, no fool to annoy--you are actuated by fear or favour to
+no man. There is 'no juggling here,' no sophistry, no intrigue, no tampering
+with the evidence, no attempt to make black white, or white black: but you
+resign yourself into the hands of a greater power, that of Nature, with the
+simplicity of a child, and the devotion of an enthusiast--'study with joy her
+manner, and with rapture taste her style.' The mind is calm, and full at the
+same time. The hand and eye are equally employed. In tracing the commonest
+object, a plant or the stump of a tree, you learn something every moment. You
+perceive unexpected differences, and discover likenesses where you looked for
+no such thing. You try to set down what you see--find out your error, and
+correct it. You need not play tricks, or purposely mistake: with all your
+pains, you are still far short of the mark. Patience grows out of the endless
+pursuit, and turns it into a luxury. A streak in a flower, a wrinkle in a
+leaf, a tinge in a cloud, a stain in an old wall or ruin grey, are seized
+with avidity as the spolia opima of this sort of mental warfare, and furnish
+out labour for another half-day. The hours pass away untold, without chagrin,
+and without weariness; nor would you ever wish to pass them otherwise.
+Innocence is joined with industry, pleasure with business; and the mind is
+satisfied, though it is not engaged in thinking or in doing any mischief.
+
+## hazlitt_familiar_style
+
+It is not easy to write a familiar style. Many people mistake a familiar for a
+vulgar style, and suppose that to write without affectation is to write at
+random. On the contrary, there is nothing that requires more precision, and,
+if I may so say, purity of expression, than the style I am speaking of. It
+utterly rejects not only all unmeaning pomp, but all low, cant phrases, and
+loose, unconnected, slipshod allusions. It is not to take the first word that
+offers, but the best word in common use; it is not to throw words together in
+any combinations we please, but to follow and avail ourselves of the true
+idiom of the language. To write a genuine familiar or truly English style is
+to write as any one would speak in common conversation who had a thorough
+command and choice of words, or who could discourse with ease, force, and
+perspicuity, setting aside all pedantic and oratorical flourishes. Or, to give
+another illustration, to write naturally is the same thing in regard to
+common conversation as to read naturally is in regard to common speech. It
+does not follow that it is an easy thing to give the true accent and
+inflection to the words you utter, because you do not attempt to rise above
+the level of ordinary life and colloquial speaking. You do not assume, indeed,
+the solemnity of the pulpit, or the tone of stage-declamation; neither are you
+at liberty to gabble on at a venture, without emphasis or discretion, or to
+resort to vulgar dialect or clownish pronunciation. You must steer a middle
+course. You are tied down to a given and appropriate articulation, which is
+determined by the habitual associations between sense and sound, and which
+you can only hit by entering into the author's meaning, as you must find the
+proper words and style to express yourself by fixing your thoughts on the
+subject you have to write about. Any one may mouth out a passage with a
+theatrical cadence, or get upon stilts to tell his thoughts; but to write or
+speak with propriety and simplicity is a more difficult task. Thus it is easy
+to affect a pompous style, to use a word twice as big as the thing you want to
+express: it is not so easy to pitch upon the very word that exactly fits it.
+Out of eight or ten words equally common, equally intelligible, with nearly
+equal pretensions, it is a matter of some nicety and discrimination to pick
+out the very one the preferableness of which is scarcely perceptible, but
+decisive.
+
+## pater_style
+
+SINCE all progress of mind consists for the most part in differentiation, in
+the resolution of an obscure and complex object into its component aspects,
+it is surely the stupidest of losses to confuse things which right reason has
+put asunder, to lose the sense of achieved distinctions, the distinction
+between poetry and prose, for instance, or, to speak more exactly, between
+the laws and characteristic excellences of verse and prose composition. On
+the other hand, those who have dwelt most emphatically on the distinction
+between prose and verse, prose and poetry, may sometimes have been tempted to
+limit the proper functions of prose too narrowly; and this again is at least
+false economy, as being, in effect, the renunciation of a certain means or
+faculty, in a world where after all we must needs make the most of things.
+Critical efforts to limit art a priori, by anticipations regarding the
+natural incapacity of the material with which this or that artist works, as
+the sculptor with solid form, or the prose-writer with the ordinary language
+of men, are always liable to be discredited by the facts of artistic
+production; and while prose is actually found to be a coloured thing with
+Bacon, picturesque with Livy and Carlyle, musical with Cicero and Newman,
+mystical and intimate with Plato and Michelet and Sir Thomas Browne, exalted
+or florid, it may be, with Milton and Taylor, it will be useless to protest
+that it can be nothing at all, except something very tamely and narrowly
+confined to mainly practical ends—a kind of "good round-hand;" as useless as
+the protest that poetry might not touch prosaic subjects as with Wordsworth,
+or an abstruse matter as with Browning, or treat contemporary life nobly as
+with Tennyson. In subordination to one essential beauty in all good literary
+style, in all literature as a fine art, as there are many beauties of poetry
+so the beauties of prose are many, and it is the business of criticism to
+estimate them as such; as it is good in the criticism of verse to look for
+those hard, logical, and quasi-prosaic excellences which that too has, or
+needs. To find in the poem, amid the flowers, the allusions, the mixed
+perspectives, of Lycidas for instance, the thought, the logical
+structure:—how wholesome! how delightful! as to identify in prose what we
+call the poetry, the imaginative power, not treating it as out of place and a
+kind of vagrant intruder, but by way of an estimate of its rights, that is,
+of its achieved powers, there.
+
+Dismissing then, under sanction of Wordsworth, that harsher opposition of
+poetry to prose, as savouring in fact of the arbitrary psychology of the
+last century, and with it the prejudice that there can be but one only
+beauty of prose style, I propose here to point out certain qualities of all
+literature as a fine art, which, if they apply to the literature of fact,
+apply still more to the literature of the imaginative sense of fact, while
+they apply indifferently to verse and prose, so far as either is really
+imaginative—certain conditions of true art in both alike, which conditions
+may also contain in them the secret of the proper discrimination and
+guardianship of the peculiar excellences of either.
+

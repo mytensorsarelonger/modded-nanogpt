@@ -1,0 +1,74 @@
+# Register exemplars and contrast pairs (§7.2 quantities 1 and 2)
+
+Status: PROVISIONAL SEEDS. The owner's hand-written exemplars are the eval set
+(PLAN.md §7.2: "the owner's asymmetry — can write the target, cannot explain
+it — is the project's key resource"). What ships here is enough structure to
+run the harness end to end and to shake it down against the Milestone 1
+checkpoints; every entry is marked seed and must be replaced by owner writing
+before any ablation is scored on it. Editing this file is the entire
+interface: add a `## name` section, done. The contamination guard runs over
+whatever is here.
+
+Format: `## <unique-id>` sections, prose body, `---` terminated. A section
+whose id contains `.contrast` is read as the contrast member of the pair
+named by stripping `.contrast`. Pair members must be roughly
+length-matched (the loss gap is per-token, so a 2x length difference
+contaminates the gap with a length effect; the harness reports both members'
+perplexities so an unbalanced pair is visible in the output, not hidden).
+
+What a pair IS (RL_STRATEGY §3): target writing vs. superficially-similar-
+but-wrong writing — wrong in the way one can feel but not articulate. The
+wrong member imitates the surface (period diction, formal cadence, archaic
+vocabulary) while missing whatever the right member has. The gap between
+their losses under the model should WIDEN as the mix works. If the seeds below
+are too easy to separate, that is fine for shake-down and wrong for science;
+the owner's pairs replace them.
+
+## seed_cold_open_1 (seed — replace with owner writing)
+
+The house had been empty since the winter of the year the canal froze, and it
+had not been emptied by anyone. The rooms had simply tired of being watched,
+one after another, and had closed their eyes. What furniture remained stood
+where the last family had set it, but the chairs had turned their backs to the
+windows, all of them, in a manner no one remembered and no one would have
+chosen. Dust lay on the sills in the shape of small hands. In the kitchen the
+water in the kettle had gone on boiling long after the fire was out, which the
+neighbours could hear at night, a thin sound like a kettle remembering, and
+they crossed themselves when they passed the gate.
+
+## seed_cold_open_1.contrast (seed — replace with owner writing)
+
+The house had been empty since the winter of the year the canal froze, and it
+had not been emptied by anyone. The rooms remained much as the last family had
+left them, and the furniture stood in its ordinary places. Dust had gathered
+on the window sills over the course of several seasons, as is usual in a
+dwelling that no one occupies. In the kitchen the kettle had been left upon
+the stove, and the neighbours passing the gate at night remarked among
+themselves that the property was a great pity, and that someone ought to see
+to it.
+
+## seed_mundane_1 (seed — replace with owner writing)
+
+An account of how a kitchen is arranged. The kitchen arranges itself around
+the stove, as a parish arranges itself around its church, and every other
+object in the room takes its station according to the ceremony of heat. The
+stove is first, and the hearth is its older sister, retired but still
+consulted. The pots hang in order of seniority. The dresser holds the plates
+the way a vault holds its dead, faces down, quiet, each in its felt-lined
+slot. The window is placed so the morning comes in across the sink and the
+water in the basin is the first thing in the house to know the day has begun.
+Bread is kept in the tin with the fallen lid, which keeps the bread from
+hearing the news, and so it keeps longer. The floor is scrubbed on Fridays so
+the house has one clean hour before Sunday comes and everyone forgets
+themselves again.
+
+## seed_mundane_1.contrast (seed — replace with owner writing)
+
+An account of how a kitchen is arranged. The kitchen is arranged around the
+stove, which supplies heat for the cooking of meals. Near the stove are placed
+the pots and pans, which are used for the preparation of food. The dresser
+contains the plates and dishes, kept in their proper order for daily use. At
+the window is the sink, where the washing up is done, and the bread is kept in
+a tin to protect it from the air. The floor is swept daily and scrubbed at the
+week's end, so that the kitchen remains in a clean and serviceable condition
+for the household.
