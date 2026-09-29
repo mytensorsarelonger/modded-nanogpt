@@ -529,6 +529,23 @@ backbone+register only, which is all the current `mix-a/b/c` presets cover. Runs
 launched before the general-text and craft slices exist are not the ablation this
 section describes.
 
+**Design update 2026-09-29 — see [MIX-LITERATURE.md](MIX-LITERATURE.md) (added
+same day, evidence + recommendations from the mixture-optimization literature).**
+The A/B/C hand-picked corners are likely the wrong shape: the field's standard
+is a sampled response-surface sweep (24–32 mixtures at 1000 steps, fit the
+exponential-of-linear mixing law, predict, verify the top candidate at full
+length), and the literature says domain interactions contradict intuition —
+the argument for sampling over corner-picking. The Apple/ITU repetition result
+(Sedova et al. 2605.12715) predicts the register slice tolerates **15–20
+repetitions** in a mixture — mix-b's neighborhood (r≈17), not the 8.7% that
+M1 used — which if it holds means M1 *under-exposed* the register and the
+~4-epoch warnings in `mixing.py`/`train_baseline.py` encode the wrong (single-
+source) rule. Both are hypotheses the §7.2 harness can measure cheaply. The
+recommended Phase 1 shape is MIX-LITERATURE.md's R1: sampled sweep with A/B/C
+corners kept as anchors and rank-invariance checks, labels from the §7.2
+objective. **Preconditions unchanged: owner exemplars first, craft slice with
+or before the sweep.**
+
 Read the sampled prose side by side. Also record held-out perplexity on (i) weird-
 register text and (ii) general modern text, to see the tradeoff curve move. **The eval
 here is you, sitting with the outputs, deciding which one is the model you meant.**

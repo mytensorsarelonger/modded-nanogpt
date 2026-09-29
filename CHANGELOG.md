@@ -93,6 +93,43 @@ writing; re-sweep both runs after the swap.
 
 ---
 
+## 2026-09-29 — Mix-design literature digested (MIX-LITERATURE.md)
+
+Before designing Phase 1's mix ablations, read the field. Four papers,
+extracted from source and digested into `MIX-LITERATURE.md` (repo root, per
+the PAUSE-note precedent) — the *why* for what it recommends:
+
+- **Data Mixing Laws** (Ye et al., 2403.16952): loss per domain is an
+  exponential-of-linear function of mixture proportions, fit on ~24–32
+  sampled runs and predictive of unseen mixtures; nested with step/size
+  scaling laws it predicted a mixture worth 48% more training. Directly
+  portable — the §7.2 row already IS the domain-loss vector.
+- **Mixture repetition under data constraints** (Sedova et al., 2605.12715):
+  in *mixtures*, scarce target data tolerates 15–20 repetitions at optimum —
+  the ≤4-epoch rule in `mixing.py` is the single-source rule and likely
+  wrong for the register slice. Predicts M1's 8.7% under-exposed the
+  register and mix-b's r≈17 is in the optimal window. Hypothesis, not
+  assumption — nobody has measured repetition against a *discrimination*
+  objective; the sweep will.
+- **RegMix** (Liu et al., 2407.01492): 512 tiny proxies + ridge regression
+  beats hand selection and DoReMi at 10% cost; domain interactions contradict
+  common sense — the argument for a sampled sweep over hand-picked A/B/C
+  corners.
+- **To Repeat or Not To Repeat** (Muennighoff et al., 2305.13230): the source
+  of the ≤4 rule, and the caveat that data *quality* does not mitigate
+  repetition damage.
+
+PLAN.md §4.2 carries the design update: Phase 1 likely becomes a sampled
+response-surface sweep (R1) with A/B/C corners kept as anchors. **The
+owner-blocked preconditions are unchanged and remain first**: the hand-written
+exemplars (the objective the surface is fit against) and the craft-essay
+catalogue (the slice the surface must span). MIX-LITERATURE.md §5 has the
+caveats stated plainly — perplexity-objective findings may not transfer to
+the register-discrimination objective, and both repetition claims are
+single-group results pending our own measurement.
+
+---
+
 ## 2026-09-27 — §7.2 exemplar/contrast-pair harness built and wired
 
 PLAN.md §7.2 called this "wiring, not infrastructure" — the preconditions
