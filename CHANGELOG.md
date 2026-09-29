@@ -50,11 +50,46 @@ steerability, not benchmark scores) EDU at pool-share is defensible.
 Headline val is Gutenberg-only (the val glob is deliberately unchanged), so
 this says the added slice did not degrade the control-val perplexity — note
 it does NOT say the mix ablation found anything; that read is the §7.2 curve
-plus the mundane probe. **Both are on the volume and unread — the workstream
-paused here (agent credit exhausted 2026-09-28 night).** First task on
-resume: `modal run modal_app.py::fetch`, tabulate `19d639b3`'s
-`register_eval.jsonl` against the M1 table above, read the mundane-probe
-generations in its `samples.log`.
+plus the mundane probe. **Read 2026-09-29** — the full curve was live-logged
+(12 checkpoints, dense-cadence REGISTER_EVERY, all `swept=false`):
+
+| step | exemplar_ppl | mean_loss_gap | craft_ppl | M1 gap (same step) |
+|------|--------------|---------------|-----------|--------------------|
+| 1000 | 4.3538 | **−0.4562** | 4.1566 | −0.3545 |
+| 2000 | 3.9574 | **−0.4528** | 3.8902 | −0.3924 |
+| 3000 | 3.8110 | **−0.5119** | 3.6663 | −0.4119 |
+
+Findings, stated carefully:
+
+- **The gap moved the WRONG way.** Deeper negative (−0.46 → −0.51 vs M1's
+  −0.35 → −0.41). Pair-level: the mundane pair dominates and got worse
+  (−0.94 → −0.84 at matched steps, i.e. the model's preference for the
+  mundane contrast member strengthened); the cold-open pair flipped from
+  positive to negative (M1 +0.11 → shakeout −0.19 at step 3000). Consistent
+  with the mechanism: 17.8% modern general text teaches modern-mundane
+  fluency, which raises P(mundane contrast) without touching P(register).
+- **The mundane probe did NOT recover.** The floor-plan generation is fluent
+  modern prose ("The floor was made of wood… the room was polished to fit")
+  vs M1's footnote-wrapped church-register collapse — the register infection
+  is gone. But it is repetition-degenerate ("a series of steps, a series of
+  stairs, a series of stairs"), and word-diversity across mundane
+  generations is *lower* than M1 (0.538 vs 0.568; every family dropped).
+  The probe is no longer wrong-register, but it is now under-diverse at 3250
+  steps — the model overall trades diversity for the lower val loss.
+- **Register voice did not visibly improve** in cold_open samples (still
+  Victorian-pastiche, not eerie).
+- Headline val improved (2.78661) but at 124M more pool tokens that is the
+  expected perplexity-per-token effect, NOT evidence the mix works.
+
+**Interpretation for the A/B/C design (not yet a decision):** at this scale,
+the general slice as configured buys mundane fluency at a cost in register
+discrimination and diversity. Candidate levers before A/B/C: raise the
+register weight (its epoch rate is unchanged from M1 by construction —
+this run never tested §4.2's register axis), lower general below pool
+share, or schedule general into the cooldown only (the existing
+`cooldown-ramp` shape generalizes). The seeds are still PROVISIONAL — none
+of these numbers are evidence until `register_exemplars.txt` is the owner's
+writing; re-sweep both runs after the swap.
 
 ---
 
