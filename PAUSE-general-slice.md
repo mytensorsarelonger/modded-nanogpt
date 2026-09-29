@@ -4,6 +4,13 @@ Working note, not repo documentation. Task: add the general-text slice per
 PLAN.md §5.1.2 ("the cheap one and should go first"). PAUSED mid-task for
 research on the approach.
 
+**RESOLVED 2026-09-28** (see CHANGELOG same day): decision was **FineWeb-EDU**;
+verification re-run against final bytes, manifest keys added, shards uploaded,
+`::verify` ok=true, shakeout run launched. Steps 1–6 below are DONE; step 7
+(no preset changes) remains deliberately undone per the Phase 1 plan. The pitfall
+notes below stay — they cost real time and the HF-Xet finalizer will bite again
+on the next bulk download.
+
 ## Done
 
 - Downloaded 1 chunk of `kjj0/finewebedu10B-gpt2` (already GPT-2-tokenized in

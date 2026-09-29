@@ -113,11 +113,22 @@
         "magic": 20240520,
         "version": 1
       }
+    ],
+    "general": [
+      {
+        "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\by_slice\\general_train_000.bin",
+        "num_tokens": 100000000,
+        "file_size": 200001024,
+        "sha256": "56c89ff62b84a8645ad7d9b3d2fbe33cb588e0d774b7b966e263fd1b945bd39a",
+        "magic": 20240520,
+        "version": 1
+      }
     ]
   },
   "slice_pool_tokens": {
     "backbone": 422078163,
-    "register": 40189140
+    "register": 40189140,
+    "general": 100000000
   },
   "slice_shard_dir": "by_slice",
   "quality_filter": "tier1_heuristic",
@@ -146,6 +157,19 @@
   },
   "slices": {
     "backbone": 422078163,
-    "register": 40189140
+    "register": 40189140,
+    "general": 100000000
+  },
+  "slice_val_shards": {
+    "general": [
+      {
+        "shard_path": "C:\\Users\\keppy\\git\\modded-nanogpt\\data\\shards\\general_val_000.bin",
+        "num_tokens": 100000000,
+        "file_size": 200001024,
+        "sha256": "64682bb1bcc5437ac1cce0efd9dcbee2fd78877b74159e21970f6b9cba734c97",
+        "magic": 20240520,
+        "version": 1
+      }
+    ]
   }
 }
