@@ -86,19 +86,29 @@ at 1,000 steps, so single-seed ablations are defensible at that horizon).
 **None of K3-mini itself exists yet.** No KDA, MoE, AttnRes, SiTU-GLU or MTP head.
 
 **The binding constraint is the corpus, not model size and not the loader.** The
-register slice is 8.7% (target 10–25%), general modern text is 0% (budget 10–20%,
-"not optional"), craft essays 0%. Milestone 1's prose is competent Victorian pastiche
-and not eerie, and the `mundane` probe collapsed into repetition — that is the
+register slice is 8.7% of the trained pool (target 10–25%; pool share 7.1% after
+the general slice landed), general modern text is **now in the pool** (FineWeb-EDU
+100M tokens, 17.8% — budget was 10–20%, "not optional"; official 2026-09-28),
+craft essays 0%. Milestone 1's prose is competent Victorian pastiche and not
+eerie, and the `mundane` probe collapsed into repetition — that is the
 general-text gap, measured.
 
 **Next, in order:** source the missing slices (PLAN.md §5.1, mechanics and
 hand-vs-automation split in **§5.1.2**), then ~~the §7.2 exemplar/contrast-pair
 eval harness~~ — **built 2026-09-27** (`evals/exemplar.py`, wired into the
 checkpoint eval loop; retroactive M1 sweep via `modal run modal_app.py::sweep`).
-Both remaining corpus work and `kda_mini.py` (Milestone 2) are compute-side
-and run in parallel. The §7.2 gate on mix ablations is now LIFTED — a mix
-run's curves can be scored on the axis that matters as long as it trains
-with the harness wired in.
+~~General-text slice~~ — **in the pool 2026-09-28** (FineWeb-EDU, 100M tokens;
+`::verify` ok) and a **shakeout trained**: 3250 steps at
+`backbone .735 / register .087 / general .178`, run `19d639b3`, val_loss
+2.78661 (M1 baseline: 2.80559 — headline val is Gutenberg-only and comparable).
+Its §7.2 curve and mundane-probe generations are on the volume, **not yet
+read**. What remains before A/B/C: the craft-essay slice (owner catalogue,
+§5.2.3), the preset rewrite over the full slice taxonomy (§4.2), and the
+owner's hand-written `register_exemplars.txt` (re-sweep both finished runs
+after the swap). `kda_mini.py` (Milestone 2) is compute-side and runs in
+parallel. The §7.2 gate on mix ablations is LIFTED — a mix run's curves can
+be scored on the axis that matters as long as it trains with the harness
+wired in.
 
 ## Traps that have already cost time
 

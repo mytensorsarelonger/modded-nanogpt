@@ -10,6 +10,54 @@ from the code alone.
 
 ---
 
+## 2026-09-28 — General-text slice official (FineWeb-EDU); shakeout launched
+
+Resolves PAUSE-general-slice.md. The open question was EDU vs plain FineWeb;
+field evidence (audit note, PLAN.md §5.1.2) says the EDU-classifier step is
+where the quality signal is and further filtering is marginal (+~0.01 mean
+accuracy in matched runs, Edu-QuRating paper) — **decision: FineWeb-EDU**
+(owner, 2026-09-28). For this slice's job (syntactic/logical scaffolding +
+steerability, not benchmark scores) EDU at pool-share is defensible.
+
+- 1 shard of `kjj0/finewebedu10B-gpt2` (already GPT-2-tokenized, exact llm.c
+  shard format): train 100M + val 100M tokens. Final bytes re-verified after
+  the hf_hub Xet finalizer settled (the PAUSE note's pitfall): sha256
+  `56c89ff6…`/`64682bb1…`, headers clean, max token id 50256 < 50304,
+  ~98k/96k EOT-separated docs.
+- `data/shards/manifest.json`: added ONLY `slice_shards.general`,
+  `slice_val_shards.general`, `slice_pool_tokens.general` (100,000,000),
+  `slices.general`. Control-arm keys (`train_shards`, `val_shards`,
+  `total_*`) untouched — the M1 headline val stays Gutenberg-only and
+  comparable. Uploaded to `k3mini-shards`; `::verify` passes with the slice
+  pool checksummed (`ok=true`, 7 slice shards + slice_val all sha256-OK).
+  The pool is now 562.3M tokens: backbone 75.1% / general 17.8% / register
+  7.1%.
+- **Shakeout launched** (detached, A100, 3250 steps, single seed, ~3h):
+  mix `backbone 0.735 / register 0.087 / general 0.178` — register's
+  sampling rate identical to M1, general at its pool share, backbone
+  diluted. One changed variable vs M1 (general added); epochs/slice
+  projected 2.97/3.69/3.03, all under the ~4-epoch repetition threshold
+  (register's 3.69 matches M1's by construction). §7.2 harness live
+  (guard clean at startup, digest 1e618cc9d92c7619); mix smoke passed
+  first (`2b9f2e97`, 3-slice loader path exercised, register eval firing,
+  exit 0). What the run answers: does the `mundane` probe recover, and does
+  the contrast-pair gap move off its −0.4 baseline. Mix passed as inline
+  JSON — the `mix-a/b/c` presets are still 2-slice and get rewritten over
+  the full taxonomy as the Phase 1 design decision (§4.2), unchanged.
+
+**Shakeout result (run `19d639b3-a870-4c35-bcf6-39180d1d4e24`, trained
+2026-09-28, exit 0, 11,930 s wall):** val_loss **2.78661** vs M1's 2.80559.
+Headline val is Gutenberg-only (the val glob is deliberately unchanged), so
+this says the added slice did not degrade the control-val perplexity — note
+it does NOT say the mix ablation found anything; that read is the §7.2 curve
+plus the mundane probe. **Both are on the volume and unread — the workstream
+paused here (agent credit exhausted 2026-09-28 night).** First task on
+resume: `modal run modal_app.py::fetch`, tabulate `19d639b3`'s
+`register_eval.jsonl` against the M1 table above, read the mundane-probe
+generations in its `samples.log`.
+
+---
+
 ## 2026-09-27 — §7.2 exemplar/contrast-pair harness built and wired
 
 PLAN.md §7.2 called this "wiring, not infrastructure" — the preconditions
