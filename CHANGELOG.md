@@ -14,10 +14,14 @@ from the code alone.
 
 A tweet thread on steering-vector intuitions, mined into `STEERING-VECTORS.md`
 (repo root, per the MIX-LITERATURE/PAUSE-note precedent) because one line in it
-reframes what the register work has been measuring. **Provenance is weaker than
-MIX-LITERATURE's: this is an unattributed tweet, not peer-reviewed literature,
-and the doc says so in its first paragraph** — the *method* stands on its own,
-the *claims* do not.
+reframes what the register work has been measuring. **Source is Thebes Vogel
+(@voooooogel), <https://x.com/voooooogel/status/2105793927035093490>.** Provenance
+is still weaker than MIX-LITERATURE's — a tweet is not peer-reviewed and none of
+its claims are verified against anything, which the doc says in its first
+paragraph — but the author has published in this exact area (the `repeng`
+control-vector library, the emergent-misalignment cross-model vector, and *Latent
+Introspection*, arXiv:2602.20031, the conference submission the thread alludes to),
+so the *method* stands on its own. The *claims* still do not.
 
 - **Why it landed here:** the recorded M1 failure — "competent Victorian
   pastiche and not eerie", `mundane` probe collapsed into repetition — is

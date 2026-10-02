@@ -2,11 +2,13 @@
 
 Written 2026-10-01 from a tweet thread on steering-vector intuitions, reproduced
 verbatim in §1. **Unlike MIX-LITERATURE.md, the source is not peer-reviewed and
-not verified against anything** — it is one researcher's working intuitions plus
-one anecdote. §2 separates what in it is testable from what is a lens, and §6
-states what would falsify the recommendations. Purpose: name the mechanism-level
-readout the register/mix work currently lacks, and the controls any such
-measurement owes. Referenced from PLAN.md §7.2.
+none of its claims are verified against anything** — it is a practitioner's
+working intuitions plus one anecdote. The author has published in this area (§1
+lists the related work), which raises the odds the intuitions are good; it does
+not make the claims evidence. §2 separates what in it is testable from what is a
+lens, and §6 states what would falsify the recommendations. Purpose: name the
+mechanism-level readout the register/mix work currently lacks, and the controls
+any such measurement owes. Referenced from PLAN.md §7.2.
 
 The one-sentence synthesis: **the mix ratio is a feature-prevalence knob, so a
 "register vector" is the same kind of intervention as the register slice at a
@@ -84,12 +86,25 @@ pairs this project already has on the volume.**
 > again, the intuition here being finetuning is "just" pushing around the
 > prevalence of features / representations in the finetune's residual stream.
 
-**Provenance note:** author handle and URL were not recorded at capture time. The
-thread is identifiable by two internal details — the "anti-emergent-misalignment
-vector" result (negative steering produced a model repeating "Certainly!") and a
-reference to the author's own "Latent Introspection" conference submissions. If
-re-found, put the URL here; until then treat it as an unattributed source and do
-not cite it as if it were a paper.
+**Source:** Thebes Vogel (@voooooogel; also theia vogel / vgel — vgel.me),
+<https://x.com/voooooogel/status/2105793927035093490>, captured 2026-10-01.
+
+**Related work by the same author, where the thread's methods actually live:**
+the `repeng` control-vector library (mean-difference control vectors trained from
+synthetic data); the cross-model emergent-misalignment steering vector (positive
+examples: Qwen2.5-Coder activations, negative: the misaligned
+Qwen-Coder-Insecure) — this is the "anti-emergent-misalignment vector" and the
+extraction method the thread alludes to; and *Latent Introspection: Models Can
+Detect Prior Concept Injections* (Pearson-Vogel, Vaněk, Douglas, Kulveit —
+arXiv:2602.20031, submitted ICML 2026), which is the "Latent Introspection
+submissions" the thread mentions.
+
+Worth noting what that last paper measures, because it is the same shape as this
+project's problem: a Qwen 32B model **denies** the injection in its sampled
+output while the logit lens shows clear detection signals in the residual stream.
+A model's stated behavior and what its residual stream carries can come apart —
+which is precisely the gap this document is about, and a reason to read the
+`mundane` probe and the §7.2 gap as behavioral instruments only.
 
 ## 2. Testable claims vs. lenses
 
@@ -277,7 +292,9 @@ applies unchanged: record base pass@k before claiming any RL gain.
   a linearly-accessible register direction at all. Report it as such.
 - **The source is a tweet.** No peer review, no replication, and its one
   quantitative anecdote is n=1. Nothing here should be cited as literature the way
-  MIX-LITERATURE.md's papers can be. The *method* (mean differences, the control
+  MIX-LITERATURE.md's papers can be. (The author's *related papers* listed in §1
+  are a different matter — those are citable, and `repeng` is the tool that
+  implements the extraction recipe.) The *method* (mean differences, the control
   battery, the balance check) is standard and stands on its own; the *claims about
   what steering shows* do not.
 - **The transfer risk is real:** the source's examples are instruction-tuned
