@@ -931,6 +931,19 @@ mix ablations must move toward positive. The shake-down earned its keep: three
 real defects surfaced and were fixed (import-order in the sweep, exemplar-PPL
 aggregate semantics, `---` terminator handling in the loader).*
 
+*Added 2026-10-01 — a fifth readout is available and untried: a **register
+vector**, extracted by the between-checkpoint method (mean activation difference
+between two checkpoints on identical contexts). The pairs this section already
+holds are the mean-difference design it needs, and the checkpoints are on the
+volume. It answers what the gap curve cannot — *which features moved* — and it is
+the mechanism behind "competent Victorian pastiche and not eerie": if the register
+slice moved costume features rather than dread features, a vector readout can say
+so. Cheapest first application is a natural experiment that already has a
+behavioral result: M1 vs the general-slice shakeout `19d639b3`, whose §7.2 curve
+moved the wrong way. Method, the four controls any such claim owes, and the
+falsification conditions are in [STEERING-VECTORS.md](STEERING-VECTORS.md). No
+extractor exists yet.*
+
 ### 7.3 The rest of the stack
 
 1. **Probe suite** (§7.1) — primary. Read it.

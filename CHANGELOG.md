@@ -10,6 +10,44 @@ from the code alone.
 
 ---
 
+## 2026-10-01 — Steering-vector lens written up (STEERING-VECTORS.md)
+
+A tweet thread on steering-vector intuitions, mined into `STEERING-VECTORS.md`
+(repo root, per the MIX-LITERATURE/PAUSE-note precedent) because one line in it
+reframes what the register work has been measuring. **Provenance is weaker than
+MIX-LITERATURE's: this is an unattributed tweet, not peer-reviewed literature,
+and the doc says so in its first paragraph** — the *method* stands on its own,
+the *claims* do not.
+
+- **Why it landed here:** the recorded M1 failure — "competent Victorian
+  pastiche and not eerie", `mundane` probe collapsed into repetition — is
+  exactly the multiple-realizability failure the thread describes (the same
+  eliciting text pulling "actor pretending" vs "character in a novel" vs true
+  belief). §7.2's contrast-pair gap says *how much worse* the model finds the
+  target than the decoy; nothing in the stack says **which features moved**.
+- **The consequential sentence:** "finetuning is 'just' pushing around the
+  prevalence of features / representations in the finetune's residual stream."
+  If that is right, the register slice weight IS a feature-prevalence knob, and a
+  register vector is the same intervention at the minimum measurable strength.
+- **What makes it cheap here:** the thread's between-checkpoint construction
+  ("average activations from both checkpoints on the same context") needs pairs
+  this project already has — M1 `21c92807` ckpt 1000/2000/3000/3250 within a run,
+  and M1 vs the general-slice shakeout `19d639b3` across runs. The latter is a
+  natural experiment: the general slice already measured as moving the §7.2 gap
+  **the wrong way** (`ceb2ad3`), so a checkpoint-diff vector on identical
+  contexts says whether it moved the *representation* away from the register —
+  mechanism instead of number, forward passes only.
+- **Also recorded:** the four controls any steering claim owes (prompt / sampler /
+  finetune-on-the-same-contrast / norm-matched random), the distractor-balance
+  check that belongs in the extractor, and R5 — test SFT-vs-RL in `eerie_rl` on
+  **intervention strength** (how much a probe or ablation moves the output)
+  rather than on behavior, since both arms can match behavior.
+- Not started: no extractor exists, no vector has been computed, and R3 (SAE
+  labelling) needs an SAE trained from scratch at this scale — deliberately
+  gated behind R1/R2 showing a direction worth naming.
+
+---
+
 ## 2026-09-28 — General-text slice official (FineWeb-EDU); shakeout launched
 
 Resolves PAUSE-general-slice.md. The open question was EDU vs plain FineWeb;
