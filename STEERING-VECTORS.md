@@ -106,6 +106,8 @@ A model's stated behavior and what its residual stream carries can come apart �
 which is precisely the gap this document is about, and a reason to read the
 `mundane` probe and the §7.2 gap as behavioral instruments only.
 
+(Field status of that paper's open items as of 2026-10-02: §7.)
+
 ## 2. Testable claims vs. lenses
 
 Read this section before using §5. Half the source's value is method and does not
@@ -308,3 +310,71 @@ applies unchanged: record base pass@k before claiming any RL gain.
   source says this directly and it matches this repo's discipline: mechanical
   findings with the evidence that produced them, no judge, no phenomenology
   smuggled in as a measurement.
+
+## 7. Field status check (2026-10-02): which of the Latent Introspection open items are done
+
+Checked against Semantic Scholar's citation graph (15 citing papers), the ACS
+Research publications page, vgel.me, and LessWrong, through 2026-10-02. Purpose:
+the paper is the nearest published instrument to this project's register problem,
+so its open items mark where the field's measurement gaps still are — and R4's
+extractor should not re-derive controls the field has now run. Caveat on method:
+citing-paper *abstracts* were checked, not every full text, and citation graphs
+lag; treat "not done" as "not found in the public record", not as proven absent.
+
+**Done — the paper's own deferred items (its §5 discussion and limitations):**
+
+- **Why final layers suppress the introspective report (post-training?).** Done,
+  twice. Will Mayner, *Decomposing introspection in LLMs: representation and
+  report* (willmayner.com, May 2026): post-training *builds* the response
+  circuitry rather than amplifying pretraining circuitry (1 relevant head in the
+  pretrained model vs 19 in the instruct model; where a head is shared,
+  post-training amplifies it ~5×). Macar et al., *Mechanisms of Introspective
+  Awareness* (arXiv:2603.21396, Anthropic): two-stage circuit — "evidence
+  carrier" features detect the perturbation, suppressing downstream "gate"
+  features that implement a default negative response; OLMo staged-checkpoint
+  analysis isolates DPO as the critical post-training stage.
+- **What circuitry produces the prompt-framing effects.** Done. Mayner: the same
+  response heads *reverse their logit contribution* between framings that differ
+  only in how the injection is described — framing is read by response-side
+  circuitry, not by the detection side. Macar et al. is reportedly more thorough
+  on framing.
+- **No mechanistic model / no causal intervention (their §5.4).** Done. Macar et
+  al.: MLPs at ~70% depth causally necessary and sufficient for detection.
+  Mayner: a single residual-stream axis carries the injection's effect from
+  L14–L28 on Gemma 3 12B; ablating it removes 94–100% of the P(yes) shift.
+
+**Not done:**
+
+- **Reliable detection of emergent-misalignment injections (their App E.3).**
+  Adjacent work only (a self-recognition-finetuning paper, arXiv:2606.23700,
+  prevents/reverses EM but does not test *detection of injected EM*).
+- **The layer-sweep anomaly — the one item the blog post explicitly deferred "to
+  a future paper."** In the post's appendix, a sweep over all injection layer
+  ranges found `[18, 33]` near-optimal for *detection* — but that range did not
+  transfer to the EM vector, and it destroyed the vector's "top of mind"
+  behavioral steering (steered samples reverted to unsteered assistant-speak).
+  Their final line: "We aren't exactly sure what to make of this, though we have
+  some hypotheses. We intend to follow up on it in a future paper." As of this
+  check: no follow-up from ACS (publications page, blog, and the March 2026
+  LessWrong linkpost all stop at the paper), none of the 15 citing papers address
+  it, and Mayner's open-question list — which worked from the *paper*, not the
+  blog appendix — does not include it. Nearest adjacent: Lederman & Mahowald
+  (arXiv:2603.05414) measured output-coherence dips vs injection layer, a
+  steering-side-effect observation, but did not test the detection/behavior
+  decoupling or top-of-mind.
+
+**Why the open item matters here specifically.** The anomaly is the same shape as
+this project's central question: an intervention geometry chosen to optimize one
+readout (detection) decouples from another readout (behavioral steering). That is
+§3 point 5 (an output-space controller is not a representation edit) and the
+premise of R1/R2 (the §7.2 gap and the representation can disagree). Two
+consequences for the recommendations:
+
+- **R1/R2 layer choice is not neutral.** A layer range picked to maximize the
+  checkpoint-diff vector's separation on one measure may be near-optimal while
+  quietly destroying another property. The §4 control battery should therefore
+  include a *behavioral* check alongside any readout-optimized layer choice —
+  does the vector still steer generation, not just separate the probes?
+- **The off-target-mass reporting rule (§6) now has published precedent** in
+  Lederman & Mahowald's coherence-vs-layer measurement; cite it rather than
+  treating off-target reporting as a novel discipline.

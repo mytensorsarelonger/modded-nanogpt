@@ -10,6 +10,34 @@ from the code alone.
 
 ---
 
+## 2026-10-02 — Field status check on Latent Introspection's open items (STEERING-VECTORS.md §7)
+
+Checked whether the work the *Latent Introspection* blog post deferred "to a
+future paper" has been done by anyone, before this project builds anything that
+leans on it. Checked: Semantic Scholar citation graph (15 citing papers), the
+ACS Research publications page, vgel.me, LessWrong; caveats recorded in §7
+(abstracts not full texts, citation-graph lag).
+
+- **The paper's own deferred items are done, twice over.** The suppression-origin
+  question (post-training?) and the prompt-framing-circuitry question were both
+  answered by Will Mayner's *Decomposing introspection in LLMs* (May 2026) and
+  Macar et al.'s *Mechanisms of Introspective Awareness* (arXiv:2603.21396,
+  Anthropic), which also supply the causal mechanistic model the paper listed as
+  missing. Anything we build should cite these, not re-derive them.
+- **The one item the blog post explicitly promised a follow-up on is untouched:**
+  the appendix's layer-sweep anomaly — a detection-optimal injection range that
+  failed to transfer to the EM vector and destroyed top-of-mind steering. No ACS
+  follow-up exists; no citing paper addresses it; Mayner worked from the paper
+  and never saw the appendix item. "Not done" here means *not found in the
+  public record*, not proven absent.
+- **Why it matters here:** the anomaly is this project's question in miniature —
+  an intervention geometry optimized for one readout decouples from another.
+  Recorded as a constraint on R1/R2 (layer choice is not neutral; pair any
+  readout-optimized range with a behavioral check) and as published precedent
+  for §6's off-target-mass reporting rule.
+
+---
+
 ## 2026-10-01 — Steering-vector lens written up (STEERING-VECTORS.md)
 
 A tweet thread on steering-vector intuitions, mined into `STEERING-VECTORS.md`
