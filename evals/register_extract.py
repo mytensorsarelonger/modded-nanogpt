@@ -28,13 +28,35 @@ baseline_model.GPT.blocks[ℓ], ℓ ∈ 0..num_layers−1. The EOT anchor positi
 (0) is excluded from every mean and from the covariance (first-token
 outliers; prereg §2.1 / §2.3 item 5).
 
-K-B/03 (steered re-scoring and the OTM sweep) extends
-modal_app.register_extract's checkpoint loop; capture_block_outputs is the
-seam — a steering hook on blocks[ℓ] composes with the same capture path.
+steering direction v_ℓ (prereg §2.2, Δh = αd with d = v̂_ℓ, α = ‖v_ℓ‖).
+
+K-B/03 (steered re-scoring, OTM and continuations — prereg §3.1 item 2,
+§2.2, §2.4): modal_app.register_extract's steering phase loads each θ_B
+checkpoint once, computes v_ℓ per layer from the SAME layer_means values
+written to register_acts.jsonl (bit-exact: float64 numpy on the identical
+python lists, so the dispatcher's local recomputation is bit-identical),
+and writes runs/<θ_B run>/steer_rescore.json (72 rows per regime: 12
+layers × {v, neg_v, zero, rand 1..3}) plus steer_continuations.jsonl (72
+rows per regime: 12 layers × {v, neg_v, zero} × 2 pair targets). The
+steering hook is capture_block_outputs' seam: a forward hook on
+blocks[ℓ] whose output becomes output + delta — E5's constant gate, every
+position, no conditioning. v_ℓ, u_ℓ, ρ_ℓ, ℓ* and the verdict itself are
+the k3-lab dispatcher's job (prereg rule 10); this repo ships forward
+passes only.
+
+Two deliberate paths, both recorded as findings, both left as they are:
+- evaluate()/score_passage applies the softcap a SECOND time after
+  forward_logits already caps once (exemplar.py:194-195). Δḡ_steer must
+  be computed on the same path as the existing register_eval rows, so the
+  steered re-score inherits it (a recorded finding for a later train).
+- OTM uses forward_logits' single-capped logits — the model's own
+  distribution — NOT the harness's second cap; the prereg §2.4 KL is a
+  property of the steered model, not of the scoring harness.
 """
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import numpy as np
@@ -50,6 +72,206 @@ from evals.exemplar import (
 )
 
 LAYER_CONVENTION = "h_l = output of block l, l in 0..11"
+
+# OTM constants, prereg §2.4 / §3.1 item 2.
+OTM_ALPHAS = (0.5, 1.0, 2.0)
+OTM_KL_DIRECTION = "unsteered||steered"
+
+
+@contextlib.contextmanager
+def steer_hook(model, layer: int, delta: Tensor):
+    """Steer block `layer`: output + delta.to(out.dtype) at EVERY position.
+
+    E5's constant gate (prereg §2.2): one forward hook on model.blocks[layer]
+    that adds `delta` at every position — no position, token or gate
+    conditioning. The hook is ALWAYS removed on exit: a leaked steering
+    hook would silently steer every later forward pass (score, covariance,
+    continuation). delta may be float32/float64; it is cast to the block's
+    bf16 output dtype inside the hook, exactly like the capture path.
+    """
+    block = model.blocks[layer]
+    handle = block.register_forward_hook(
+        lambda _module, _inputs, out: out + delta.to(out.dtype)
+    )
+    try:
+        yield handle
+    finally:
+        handle.remove()
+
+
+def rand_direction(seed: int, dim: int = 768) -> np.ndarray:
+    """Unit-norm random direction for the norm-matched controls (prereg §2.2).
+
+    seed = 20261009 + 1000·j + ℓ (j ∈ {1,2,3}, ℓ = layer). Deterministic
+    (default_rng), unit norm, float64. The caller scales by ‖v_ℓ‖ so the
+    control is norm-matched to v_ℓ exactly.
+    """
+    r = np.random.default_rng(seed).standard_normal(dim)
+    return (r / np.linalg.norm(r)).astype(np.float64)
+
+
+def otm_values(
+    model, windows: Tensor, layer: int, v: np.ndarray, alphas, device,
+    batch: int = 4,
+) -> list[float]:
+    """OTM(α) per prereg §2.4 (equations.md:200-202), one value per alpha.
+
+    delta = α·v (v = the FULL v_ℓ, not the unit direction). For each window:
+    logp_0 = log_softmax(forward_logits(x), -1) unhooked; logp_α the same
+    under the hook; KL_t = Σ_vocab exp(logp_0)·(logp_0 − logp_α) at each
+    position t; positions 1..W−1 kept (position 0 dropped, as for Σ);
+    OTM(α) = mean over kept positions, then over windows. forward_logits'
+    single-capped logits — the model's own distribution — NOT the harness's
+    second softcap. B×1024×50304 float32 is ~206 MB per window, so batch
+    ≤ 4 windows per forward (default 4).
+    """
+    windows_dev = windows.to(device)
+    n_windows, window = windows_dev.shape
+    v_t = torch.tensor(np.asarray(v, dtype=np.float64), dtype=torch.float32,
+                        device=device)
+    alphas = [float(a) for a in alphas]
+    totals = [0.0] * len(alphas)
+    counts = [0] * len(alphas)
+    # batches outer, alphas inner: the unsteered logp_0 pass runs once per
+    # chunk and is reused by every α (α = 0 skips forward passes entirely —
+    # OTM(0) = 0 is exact by construction, prereg §2.4).
+    for start in range(0, n_windows, batch):
+        chunk = windows_dev[start : start + batch]
+        with torch.no_grad():
+            logp0 = torch.log_softmax(model.forward_logits(chunk), -1)
+            for i, alpha in enumerate(alphas):
+                if alpha == 0:
+                    continue
+                delta = (alpha * v_t).to(torch.bfloat16)
+                with steer_hook(model, layer, delta):
+                    logpa = torch.log_softmax(model.forward_logits(chunk), -1)
+                # KL_t = Σ_vocab exp(logp_0)·(logp_0 − logp_α); keep
+                # positions 1..W−1 (position 0 dropped, as for Σ)
+                kl = (logp0.exp() * (logp0 - logpa)).sum(-1)[:, 1:]
+                totals[i] += float(kl.sum())
+                counts[i] += kl.numel()
+    values = []
+    for i, alpha in enumerate(alphas):
+        if alpha == 0:
+            values.append(0.0)
+        else:
+            if counts[i] == 0:
+                raise ValueError("otm_values: no kept positions")
+            values.append(totals[i] / counts[i])
+    return values
+
+
+def greedy_continuation(model, prefix_ids: list[int], n_new: int,
+                        device) -> list[int]:
+    """`n_new` greedy (temperature 0) steps from prefix_ids (no KV cache).
+
+    Each step: argmax(forward_logits(seq)[0, -1]) on the full sequence;
+    the sequence is re-forwarded whole every step — deterministic and
+    steering-hook compatible (the caller installs/removes the hook). The
+    returned ids are ints, plain python, appendable to the prefix.
+    """
+    seq = torch.tensor([list(prefix_ids)], dtype=torch.int64, device=device)
+    new_ids: list[int] = []
+    with torch.no_grad():
+        for _ in range(n_new):
+            logits = model.forward_logits(seq)[0, -1]
+            next_id = int(torch.argmax(logits).item())
+            new_ids.append(next_id)
+            seq = torch.cat([seq, torch.tensor([[next_id]], dtype=torch.int64,
+                                                device=device)], dim=1)
+    return new_ids
+
+
+def direction_delta(direction: str, v: np.ndarray, v_norm: float) -> np.ndarray:
+    """The delta for one contract direction, all against the same v_ℓ (K-B/03).
+
+    "v" → +v_ℓ, "neg_v" → −v_ℓ, "zero" → zeros (the hook is still installed
+    by the caller), "rand:<seed>" → rand_direction(seed)·‖v_ℓ‖ (norm-matched,
+    prereg §2.2). float64 in, float64 out; the hook casts to the block dtype.
+    """
+    v = np.asarray(v, dtype=np.float64)
+    if direction == "v":
+        return v
+    if direction == "neg_v":
+        return -v
+    if direction == "zero":
+        return np.zeros_like(v)
+    if direction.startswith("rand:"):
+        seed = int(direction.split(":", 1)[1])
+        return rand_direction(seed, dim=v.shape[0]) * float(v_norm)
+    raise ValueError(f"unknown direction {direction!r}")
+
+
+def steer_row(
+    model, enc, *,
+    regime: str,
+    run_id: str,
+    step: int,
+    theta_A: dict,
+    layer: int,
+    direction: str,
+    alpha: float,
+    v: np.ndarray,
+    v_norm: float,
+    exemplar_file,
+    craft_file,
+    seq_len: int,
+    device,
+    windows: Tensor | None = None,
+    window_source: str | None = None,
+    otm_batch: int = 4,
+    otm: list[float] | None = None,
+) -> dict:
+    """One steer_rescore.json row (prereg §3.1 item 2). Forward passes only.
+
+    Direction deltas (all against the same v_ℓ): "v" → +v (alpha 1.0),
+    "neg_v" → −v (alpha 1.0), "zero" → zeros (alpha 0.0; hook STILL
+    installed), "rand:<seed>" → rand_direction(seed)·‖v‖ (alpha 1.0,
+    norm-matched). Each row's evaluate() runs under the hook on the same
+    second-softcap path as the existing register_eval rows. Direction "v"
+    additionally carries the OTM(α) sweep: computed here from `windows`
+    unless the caller passes precomputed `otm` values (the modal_app phase
+    does that, so it can time the OTM passes separately from the re-scores).
+    Key set exactly as the k3-lab dispatcher's validate_steer expects
+    (check_kb.py): regime, run_id, step, theta_A, layer, direction, alpha,
+    v_norm, mean_loss_gap_steered, contrast_gaps, otm (null off "v").
+    """
+    from evals.exemplar import evaluate
+
+    delta = torch.tensor(direction_delta(direction, v, v_norm),
+                         dtype=torch.float32, device=device)
+    with steer_hook(model, layer, delta):
+        result = evaluate(model, enc, exemplar_file=exemplar_file,
+                          craft_file=craft_file, seq_len=seq_len,
+                          device=device)
+    otm_dict = None
+    if direction == "v":
+        if otm is None:
+            if windows is None or window_source is None:
+                raise ValueError("direction 'v' requires windows/window_source")
+            otm = otm_values(model, windows, layer, v, OTM_ALPHAS, device,
+                             batch=otm_batch)
+        otm_dict = {
+            "alphas": list(OTM_ALPHAS),
+            "values": [float(x) for x in otm],
+            "kl_direction": OTM_KL_DIRECTION,
+            "off_target_windows": int(windows.shape[0]),
+            "positions_per_window": int(windows.shape[1] - 1),
+            "window_source": window_source,
+        }
+    return {
+        "regime": regime,
+        "run_id": run_id,
+        "step": step,
+        "theta_A": {"run_id": theta_A["run_id"], "step": theta_A["step"]},
+        "layer": int(layer),
+        "direction": direction,
+        "alpha": float(alpha),
+        "v_norm": float(v_norm),
+        "mean_loss_gap_steered": float(result["mean_loss_gap"]),
+        "contrast_gaps": result["contrast_gaps"],
+        "otm": otm_dict,
+    }
 
 
 def capture_block_outputs(model, inputs: Tensor) -> list[Tensor]:

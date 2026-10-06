@@ -10,6 +10,43 @@ from the code alone.
 
 ---
 
+## 2026-10-06 — K-B extractor: register_extract for the R1/R2 pre-registration
+
+`modal run modal_app.py::extract` (the `register_extract` Modal function)
+now writes, per the k3-lab steering pre-registration
+(paper/steering/prereg-R1-R2.md §3.1): `register_acts.jsonl` rows
+(per-context layer means, K-B/01), `register_covariance_<step>.npz` (θ_A,
+K-B/01), and — new in K-B/03 — `runs/<θ_B run>/steer_rescore.json` (72 rows
+per regime: 12 layers × {v, neg_v, zero, rand 1..3}; each row is the §7.2
+`evaluate()` re-run under a steering hook on the θ_B checkpoint, plus the
+OTM(α) sweep at α ∈ {0.5, 1, 2}·‖v_ℓ‖ on direction "v" rows) and
+`runs/<θ_B run>/steer_continuations.jsonl` (72 rows per regime: greedy
+64-token continuations under +v/−v/0 for each layer and each of the 2 pair
+targets, saved for the owner to read — never scored or judged by code,
+prereg rule 8; the K-B/03 brief's artifact line says 144, but its own
+pinned definition enumerates 72 and the dispatcher never reads this file).
+
+Why: the pre-registration pairs every layer claim with a behavioural check
+and an off-target-mass report (prereg §2.2, §2.4). The verdict itself is
+computed in k3-lab (check_kb.py), not here — this repo ships forward-pass
+artifacts only (prereg rule 10). v_ℓ is computed in the container from the
+very `layer_means` values written to register_acts.jsonl so the
+dispatcher's local recomputation is bit-exact. The zero-direction rows are
+asserted in-container to land within 1e-4 of the unsteered `evaluate()` at
+θ_B (recorded in the return dict as `unsteered_mean_loss_gap`). The
+steering hook adds `delta` at every position (E5's constant gate) on
+`blocks[ℓ]` and is removed in a `finally`; OTM uses `forward_logits`'
+single-capped logits, deliberately NOT the harness's second softcap
+(score_passage applies it twice — a recorded finding for a later train,
+left unchanged so Δḡ_steer sits on the same path as the existing
+register_eval rows).
+
+Also: `analysis/seed_band.py` was missing from the container image, so the
+full suite could not even collect; K-B/01 added it to the image
+(`modal_app.py` IMAGE_FILES). Eval-only; not yet run.
+
+---
+
 ## 2026-10-06 — Correction: shakeout pair attribution (2026-09-28 entry)
 
 The 2026-09-28 entry read the shakeout's §7.2 curves with the pair attribution

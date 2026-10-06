@@ -1094,6 +1094,7 @@ def register_extract(m1_run: str, sk_run: str, r1_step: int = 3250,
     """
     import time
 
+    import numpy as np
     import torch
     import tiktoken
     # cwd + sys.path FIRST: baseline_model / evals live in REPO_DIR, and the
@@ -1103,7 +1104,9 @@ def register_extract(m1_run: str, sk_run: str, r1_step: int = 3250,
     sys.path.insert(0, REPO_DIR)
     from baseline_model import GPT
     from evals.exemplar import (
+        EOT_TOKEN,
         eval_set_digest,
+        evaluate,
         load_passages,
         assert_clean,
         append_jsonl,
@@ -1113,7 +1116,14 @@ def register_extract(m1_run: str, sk_run: str, r1_step: int = 3250,
         acts_contexts,
         layer_covariance,
         offtarget_windows,
+        otm_values,
         save_covariance,
+    )
+    from evals.register_extract import (
+        direction_delta,
+        greedy_continuation,
+        steer_hook,
+        steer_row,
     )
     from config import config
 
@@ -1164,6 +1174,13 @@ def register_extract(m1_run: str, sk_run: str, r1_step: int = 3250,
 
     acts_done: list[list] = []
     cov_paths: list[str] = []
+    contexts_by_key: dict[tuple[str, int], list[dict]] = {}
+    # The off-target windows are shared by the θ_A covariance and the K-B/03
+    # OTM sweep: hoisted out of the covariance branch so both reuse the same
+    # tensor and window_source (prereg §2.4 / §3.1 item 2).
+    windows, window_source = offtarget_windows(
+        "data/shards/gutenberg_train_*.bin", n_windows=32,
+        window=config.seq_len)
     for run_id, step in acts_plan:
         checkpoint = f"ckpt_{step:05d}.pt"
         ck = Path(RUNS_MOUNT) / run_id / checkpoint
@@ -1204,6 +1221,7 @@ def register_extract(m1_run: str, sk_run: str, r1_step: int = 3250,
             "contexts": contexts,
         })
         acts_done.append([run_id, step])
+        contexts_by_key[(run_id, step)] = contexts
         timings[f"acts_{run_id[:8]}_{step}"] = time.perf_counter() - t_acts
         print(f"[extract] {run_id[:8]}/{checkpoint}: acts for "
               f"{len(contexts)} contexts appended "
@@ -1211,9 +1229,6 @@ def register_extract(m1_run: str, sk_run: str, r1_step: int = 3250,
 
         if run_id == m1_run and step in cov_steps:
             t_cov = time.perf_counter()
-            windows, window_source = offtarget_windows(
-                "data/shards/gutenberg_train_*.bin", n_windows=32,
-                window=config.seq_len)
             cov = layer_covariance(model, windows, device, batch=8,
                                    exclude_position=0)
             if cov["count"] != 32 * (config.seq_len - 1):
@@ -1233,15 +1248,181 @@ def register_extract(m1_run: str, sk_run: str, r1_step: int = 3250,
                   f"({timings[f'cov_{run_id[:8]}_{step}']:.1f}s)")
 
     # --- steering / OTM (K-B/03) ---
-    # Steered re-scoring, random/negated controls, and the OTM(α) sweep go
-    # here: they extend this checkpoint loop over the SAME loaded model,
-    # checkpoint plan, and eval set (prereg §3.1 items 2 and 4).
+    # Steered re-scoring, random/negated controls, and the OTM(α) sweep:
+    # they extend the loop above over the SAME model, checkpoint plan, and
+    # eval set (prereg §3.1 items 2 and 4). Regimes (fixed): R1 θ_A = (M1,
+    # r1_step), θ_B = (SK, r1_step); R2 θ_A = (M1, 1000), θ_B = (M1, 3250).
+    pair_targets = ["seed_cold_open_1", "seed_mundane_1"]
+
+    def _load(run_id: str, step: int):
+        checkpoint = f"ckpt_{step:05d}.pt"
+        ck = Path(RUNS_MOUNT) / run_id / checkpoint
+        if not ck.is_file():
+            raise FileNotFoundError(f"no such checkpoint on the runs volume: {ck}")
+        payload = torch.load(ck, map_location=device, weights_only=True)
+        if payload.get("format", 1) < 3:
+            state = payload.get("model_state_dict") or payload.get("model")
+        else:
+            state = payload["model_state_dict"]
+        model.load_state_dict(state)
+        return checkpoint
+
+    # Per-regime θ_B model dir and θ_A acts, for v_ℓ: computed in float64
+    # numpy from the very layer_means values written to register_acts.jsonl,
+    # so the k3-lab dispatcher's local recomputation is bit-exact (the same
+    # python lists, the same accumulation order).
+    def _context_means(key: tuple[str, int]) -> np.ndarray:
+        contexts = contexts_by_key[key]
+        return np.array(
+            [[c["layer_means"][str(l)] for c in contexts]
+             for l in range(config.num_layers)], dtype=np.float64)
+
+    regimes = [
+        ("R1", (m1_run, r1_step), (sk_run, r1_step)),
+        ("R2", (m1_run, 1000), (m1_run, 3250)),
+    ]
+    steer_paths: dict[str, str] = {}
+    cont_paths: dict[str, str] = {}
+    unsteered_gaps: dict[str, float] = {}
+    for name, theta_a, theta_b in regimes:
+        checkpoint = _load(*theta_b)
+        means_a = _context_means(theta_a)
+        means_b = _context_means(theta_b)
+        # v_ℓ = mean over the 7 contexts at θ_B − the same at θ_A — mean
+        # FIRST, then subtract, matching the k3-lab dispatcher's
+        # accumulation (check_kb.py: v = means_b.mean(axis=1) −
+        # means_a.mean(axis=1)) bit-for-bit on the same float64 values.
+        v_per_layer = means_b.mean(axis=1) - means_a.mean(axis=1)
+
+        # Unsteered evaluate() at θ_B: the `zero` rows must land within
+        # 1e-4 of it (the dispatcher re-checks from register_eval.jsonl).
+        t0r = time.perf_counter()
+        base_result = evaluate(model, enc, exemplar_file=exemplar_file,
+                               craft_file=craft_file, seq_len=config.seq_len,
+                               device=device)
+        unsteered_gaps[name] = float(base_result["mean_loss_gap"])
+        print(f"[extract] steer {name}: unsteered mean_loss_gap "
+              f"{unsteered_gaps[name]:.6f} at {theta_b[0][:8]}/{checkpoint}")
+
+        rows = []
+        t_steer = time.perf_counter()
+        for layer in range(config.num_layers):
+            v_l = v_per_layer[layer]
+            v_norm = float(np.linalg.norm(v_l))
+            directions = [
+                ("v", 1.0), ("neg_v", 1.0), ("zero", 0.0),
+                *((f"rand:{20261009 + 1000 * j + layer}", 1.0)
+                  for j in (1, 2, 3)),
+            ]
+            otm_vals = None
+            for direction, alpha in directions:
+                if direction == "v":
+                    # OTM timed separately from the re-score so the two
+                    # phases stay attributable in timings_s.
+                    t_otm = time.perf_counter()
+                    otm_vals = otm_values(
+                        model, windows, layer, v_l,
+                        [0.5, 1.0, 2.0], device, batch=4)
+                    timings[f"otm_{name}_{layer}"] = \
+                        time.perf_counter() - t_otm
+                row = steer_row(
+                    model, enc, regime=name, run_id=theta_b[0],
+                    step=theta_b[1],
+                    theta_A={"run_id": theta_a[0], "step": theta_a[1]},
+                    layer=layer, direction=direction, alpha=alpha,
+                    v=v_l, v_norm=v_norm,
+                    exemplar_file=exemplar_file, craft_file=craft_file,
+                    seq_len=config.seq_len, device=device,
+                    windows=windows, window_source=window_source,
+                    otm=otm_vals if direction == "v" else None,
+                )
+                if direction == "zero":
+                    residual = abs(row["mean_loss_gap_steered"]
+                                   - unsteered_gaps[name])
+                    if residual > 1e-4:
+                        raise ValueError(
+                            f"steer {name} layer {layer} zero residual "
+                            f"{residual} > 1e-4 — the hook perturbs the "
+                            "scoring path"
+                        )
+                rows.append(row)
+        if len(rows) != 72:
+            raise ValueError(f"steer {name}: {len(rows)} rescore rows != 72")
+        steer_path = (Path(RUNS_MOUNT) / theta_b[0] / "steer_rescore.json")
+        steer_path.write_text(json.dumps(rows, allow_nan=False) + "\n",
+                              encoding="utf-8")
+        steer_paths[name] = str(steer_path)
+        timings[f"otm_{name}"] = sum(
+            timings.pop(f"otm_{name}_{layer}")
+            for layer in range(config.num_layers))
+        timings[f"steer_{name}"] = (time.perf_counter() - t_steer
+                                    - timings[f"otm_{name}"])
+        print(f"[extract] steer {name}: 72 rescore rows -> {steer_path.name} "
+              f"({timings[f'steer_{name}']:.1f}s)")
+        print(f"[extract] otm {name}: 3 alphas x 32 windows x "
+              f"{config.num_layers} layers "
+              f"({timings[f'otm_{name}']:.1f}s)")
+
+        # Continuations: prefix = [EOT] + ids[:64] of each pair target;
+        # 64 greedy steps under the hook, saved for the owner to read —
+        # never scored or judged here (prereg rule 8).
+        t_cont = time.perf_counter()
+        targets = {p.id: p.text for p in load_passages(exemplar_file)}
+        cont_rows = []
+        for layer in range(config.num_layers):
+            v_l = v_per_layer[layer]
+            v_norm = float(np.linalg.norm(v_l))
+            for direction in ("v", "neg_v", "zero"):
+                delta = torch.tensor(
+                    direction_delta(direction, v_l, v_norm),
+                    dtype=torch.float32, device=device)
+                for pair in pair_targets:
+                    ids = enc.encode(targets[pair], allowed_special=set())
+                    prefix_ids = [EOT_TOKEN] + ids[:64]
+                    with steer_hook(model, layer, delta):
+                        cont = greedy_continuation(
+                            model, prefix_ids, 64, device)
+                    cont_rows.append({
+                        "regime": name,
+                        "run_id": theta_b[0],
+                        "step": theta_b[1],
+                        "layer": layer,
+                        "direction": direction,
+                        "pair": pair,
+                        "prefix_ids": prefix_ids,
+                        "prefix_text": enc.decode(prefix_ids),
+                        "continuation_ids": cont,
+                        "continuation_text": enc.decode(cont),
+                    })
+        # 12 layers × 3 directions × 2 pair targets = 72 rows per regime.
+        # (The K-B/03 brief's artifact line says 144; its own pinned
+        # definition — "each layer, direction in (v, neg_v, zero) and each
+        # pair target" — enumerates 72. The k3-lab dispatcher never reads
+        # this file (prereg rule 8: continuations are for the owner's eyes
+        # only), so the enumeration is implemented and the discrepancy is
+        # reported in the train log.)
+        if len(cont_rows) != 72:
+            raise ValueError(
+                f"steer {name}: {len(cont_rows)} continuation rows != 72")
+        cont_path = (Path(RUNS_MOUNT) / theta_b[0]
+                     / "steer_continuations.jsonl")
+        cont_path.write_text(
+            "".join(json.dumps(r, allow_nan=False) + "\n"
+                    for r in cont_rows), encoding="utf-8")
+        cont_paths[name] = str(cont_path)
+        timings[f"continuations_{name}"] = time.perf_counter() - t_cont
+        print(f"[extract] continuations {name}: {len(cont_rows)} rows -> "
+              f"{cont_path.name} "
+              f"({timings[f'continuations_{name}']:.1f}s)")
 
     runs_vol.commit()
     print("[extract] runs volume committed")
     return {
         "acts": acts_done,
         "covariance": cov_paths,
+        "steer_rescore": steer_paths,
+        "steer_continuations": cont_paths,
+        "unsteered_mean_loss_gap": unsteered_gaps,
         "timings_s": {k: round(v, 2) for k, v in timings.items()},
         "eval_set_digest": digest,
     }
