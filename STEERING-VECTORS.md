@@ -315,55 +315,80 @@ applies unchanged: record base pass@k before claiming any RL gain.
 
 ## 7. Field status check (2026-10-02): which of the Latent Introspection open items are done
 
-Checked against Semantic Scholar's citation graph (15 citing papers), the ACS
-Research publications page, vgel.me, and LessWrong, through 2026-10-02. Purpose:
+Checked against Semantic Scholar's citation graph (15 citing papers; 16 as of
+2026-10-06, via the Semantic Scholar API citations endpoint for
+arXiv:2602.20031), the ACS Research publications page
+<https://acsresearch.org/research>, vgel.me <https://vgel.me/posts/>, and
+LessWrong, through 2026-10-02. Purpose:
 the paper is the nearest published instrument to this project's register problem,
 so its open items mark where the field's measurement gaps still are — and R4's
 extractor should not re-derive controls the field has now run. Caveat on method:
 citing-paper *abstracts* were checked, not every full text, and citation graphs
 lag; treat "not done" as "not found in the public record", not as proven absent.
 
+**Refresh 2026-10-06.** Nothing new since 2026-10-02 on any of the three open
+watches. Checked: the ACS publications page <https://acsresearch.org/research>
+(newest item: *Pacing the Frontier*, September 2026; no introspection
+follow-up); vgel.me <https://vgel.me/posts/> (newest post is still *Small
+Models Can Introspect, Too*, December 12 2025 — no follow-up on the
+layer-sweep anomaly); the repeng repo <https://github.com/vgel/repeng> (latest
+commit Sep 24, 2025, a `compute_hiddens` hook; no new release — PyPI
+<https://pypi.org/project/repeng/> is still at 0.4.0, 2024-12-14); and
+Semantic Scholar's citing-paper list (16 as of today; none tests detection of
+injected emergent misalignment or the detection/steering decoupling).
+
 **Done — the paper's own deferred items (its §5 discussion and limitations):**
 
 - **Why final layers suppress the introspective report (post-training?).** Done,
   twice. Will Mayner, *Decomposing introspection in LLMs: representation and
-  report* (willmayner.com, May 2026): post-training *builds* the response
-  circuitry rather than amplifying pretraining circuitry (1 relevant head in the
-  pretrained model vs 19 in the instruct model; where a head is shared,
-  post-training amplifies it ~5×). Macar et al., *Mechanisms of Introspective
-  Awareness* (arXiv:2603.21396, Anthropic): two-stage circuit — "evidence
+  report* (willmayner.com
+  <https://willmayner.com/blog/decomposing-introspection/>, May 2026):
+  post-training *builds* the response circuitry rather than amplifying
+  pretraining circuitry (1 relevant head in the pretrained model vs 19 in the
+  instruct model; where a head is shared, post-training amplifies it ~5×).
+  Macar et al., *Mechanisms of Introspective Awareness* (arXiv:2603.21396
+  <https://arxiv.org/abs/2603.21396>, Anthropic): two-stage circuit — "evidence
   carrier" features detect the perturbation, suppressing downstream "gate"
   features that implement a default negative response; OLMo staged-checkpoint
   analysis isolates DPO as the critical post-training stage.
-- **What circuitry produces the prompt-framing effects.** Done. Mayner: the same
+- **What circuitry produces the prompt-framing effects.** Done. Mayner
+  <https://willmayner.com/blog/decomposing-introspection/>: the same
   response heads *reverse their logit contribution* between framings that differ
   only in how the injection is described — framing is read by response-side
   circuitry, not by the detection side. Macar et al. is reportedly more thorough
-  on framing.
+  on framing (Mayner's concurrency note, unsourced beyond
+  <https://willmayner.com/blog/decomposing-introspection/> 2026-10-06).
 - **No mechanistic model / no causal intervention (their §5.4).** Done. Macar et
-  al.: MLPs at ~70% depth causally necessary and sufficient for detection.
-  Mayner: a single residual-stream axis carries the injection's effect from
-  L14–L28 on Gemma 3 12B; ablating it removes 94–100% of the P(yes) shift.
+  al. <https://arxiv.org/html/2603.21396v5>: MLPs at ~70% depth causally
+  necessary and sufficient for detection.
+  Mayner <https://willmayner.com/blog/decomposing-introspection/>: a single
+  residual-stream axis carries the injection's effect from L14–L28 on Gemma 3
+  12B; ablating it removes 94–100% of the P(yes) shift.
 
 **Not done:**
 
 - **Reliable detection of emergent-misalignment injections (their App E.3).**
-  Adjacent work only (a self-recognition-finetuning paper, arXiv:2606.23700,
+  Adjacent work only (a self-recognition-finetuning paper, arXiv:2606.23700
+  <https://arxiv.org/abs/2606.23700>,
   prevents/reverses EM but does not test *detection of injected EM*).
 - **The layer-sweep anomaly — the one item the blog post explicitly deferred "to
-  a future paper."** In the post's appendix, a sweep over all injection layer
+  a future paper."** In the post's appendix
+  <https://vgel.me/posts/qwen-introspection/>, a sweep over all injection layer
   ranges found `[18, 33]` near-optimal for *detection* — but that range did not
   transfer to the EM vector, and it destroyed the vector's "top of mind"
   behavioral steering (steered samples reverted to unsteered assistant-speak).
   Their final line: "We aren't exactly sure what to make of this, though we have
   some hypotheses. We intend to follow up on it in a future paper." As of this
-  check: no follow-up from ACS (publications page, blog, and the March 2026
-  LessWrong linkpost all stop at the paper), none of the 15 citing papers address
-  it, and Mayner's open-question list — which worked from the *paper*, not the
-  blog appendix — does not include it. Nearest adjacent: Lederman & Mahowald
-  (arXiv:2603.05414) measured output-coherence dips vs injection layer, a
-  steering-side-effect observation, but did not test the detection/behavior
-  decoupling or top-of-mind.
+  check: no follow-up from ACS (publications page
+  <https://acsresearch.org/research>, blog <https://vgel.me/posts/>, and the
+  March 2026 LessWrong linkpost
+  <https://www.greaterwrong.com/posts/aZRgHcxz9jf22hrBs/latent-introspection-and-other-open-source-introspection>
+  all stop at the paper), none of the 16 citing papers (as of 2026-10-06)
+  address it, and Mayner's open-question list — which worked from the *paper*,
+  not the blog appendix — does not include it. Nearest adjacent: Lederman &
+  Mahowald (arXiv:2603.05414 <https://arxiv.org/html/2603.05414v2>) measured
+  output-coherence dips vs injection layer, a steering-side-effect observation,
+  but did not test the detection/behavior decoupling or top-of-mind.
 
 **Why the open item matters here specifically.** The anomaly is the same shape as
 this project's central question: an intervention geometry chosen to optimize one
@@ -378,5 +403,6 @@ consequences for the recommendations:
   include a *behavioral* check alongside any readout-optimized layer choice —
   does the vector still steer generation, not just separate the probes?
 - **The off-target-mass reporting rule (§6) now has published precedent** in
-  Lederman & Mahowald's coherence-vs-layer measurement; cite it rather than
+  Lederman & Mahowald's coherence-vs-layer measurement
+  <https://arxiv.org/html/2603.05414v2>; cite it rather than
   treating off-target reporting as a novel discipline.

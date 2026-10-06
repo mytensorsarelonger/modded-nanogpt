@@ -10,6 +10,23 @@ from the code alone.
 
 ---
 
+## 2026-10-06 — Field status refresh (STEERING-VECTORS.md §7)
+
+§7's ~15 factual claims about other people's work carried no links, so none of
+them was checkable; this refresh puts a URL and a verbatim quote on each. All
+21 rows in the k3-lab `05-quotes.jsonl` train log verify against the live
+pages (lab.quotes: 21 rows, 21 verified, 0 errors, 1 benign warn). What was
+re-checked: Semantic Scholar's citing-paper list, the ACS publications page,
+vgel.me, the LessWrong linkpost, and the repeng library. What changed: the
+citing-paper count moved 15 → 16 since 2026-10-02 and is now dated inline;
+the Mayner/Macar/Lederman-Mahowald/arXiv:2606.23700 claims each got their
+source URL inline; the layer-sweep anomaly bullet now links the blog appendix
+that deferred it "to a future paper". A **Refresh 2026-10-06** paragraph
+records that nothing new exists on either "Not done" watch or repeng (latest
+commit Sep 24, 2025; PyPI still 0.4.0), so the two open items stay open.
+
+---
+
 ## 2026-10-06 — Status drift fixed; K3 report tracked
 
 Found by the k3-lab drift check plus one by hand. Status lines kept naming
