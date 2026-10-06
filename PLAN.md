@@ -9,10 +9,14 @@ competent Victorian pastiche and **not yet eerie**; the samples say the register
 share (8.7%) and the missing general-text slice (0%) are the binding constraints.
 Phase 1 now carries three jobs, not one (§4.2, per [RL_STRATEGY.md](RL_STRATEGY.md)).
 
-**Next, in order:** source the missing corpus slices (§5.1, mechanics in §5.1.2) and
-build the exemplar/contrast-pair eval harness (§7.2). `kda_mini.py` (Milestone 2)
-proceeds in parallel, built around a swappable attention mixer with a SWA control
-arm (§4.1). Nothing is currently running and no compute is committed.
+**Next, in order:** the craft-essay slice (owner catalogue, §5.2.3), the preset
+rewrite over the full slice taxonomy (§4.2), and the owner's hand-written
+`register_exemplars.txt` (re-sweep both finished runs after the swap). Done since the
+audit below: the §7.2 harness (built 2026-09-27) and the general-text slice
+(FineWeb-EDU, in the pool 2026-09-28); its shakeout `19d639b3` moved the §7.2 gap the
+wrong way (read 2026-09-29, CHANGELOG). `kda_mini.py` (Milestone 2) proceeds in
+parallel, built around a swappable attention mixer with a SWA control arm (§4.1).
+Nothing is currently running and no compute is committed.
 
 **Audited 2026-09-27 against field research through Sep 2026.** The plan's
 structure held — control-arm discipline, the seed-band gate, the three-job
@@ -924,12 +928,14 @@ infrastructure. Four tracked quantities, wired into the checkpoint eval loop:
 Modal volume waiting to be measured, which also shakes the harness down before
 any result depends on it. *Done 2026-09-27 — `register_sweep` over
 21c92807 (ckpt 1000/2000/3000/3250). Headline: the contrast-pair loss gap is
-NEGATIVE across the whole baseline curve (−0.35 → −0.41 nats/tok, deepening) —
-the general-text baseline prefers the mundane member of every pair over the
-register target, and training makes it more so. That number is the zero point
-mix ablations must move toward positive. The shake-down earned its keep: three
-real defects surfaced and were fixed (import-order in the sweep, exemplar-PPL
-aggregate semantics, `---` terminator handling in the loader).*
+NEGATIVE across the whole baseline curve (−0.355 at step 1000, −0.412 at 3000,
+−0.386 at 3250 nats/tok; n = 2 pairs, deepest at 3000) — the mean is carried by
+the mundane pair (≈ −0.88 throughout), whose mundane member the baseline prefers
+over the register target; the cold-open pair stays positive (+0.17 → +0.11).
+That number is the zero point mix ablations must move toward positive. The
+shake-down earned its keep: three real defects surfaced and were fixed
+(import-order in the sweep, exemplar-PPL aggregate semantics, `---` terminator
+handling in the loader).*
 
 *Added 2026-10-01 — a fifth readout is available and untried: a **register
 vector**, extracted by the between-checkpoint method (mean activation difference
@@ -1178,8 +1184,8 @@ strategy, the post-training ladder, and the condensed field survey live in
 ## Appendix B — References and repos
 
 **Papers / reports**
-- **Kimi K3 technical report** — primary architecture source. On disk at
-  `C:\Users\keppy\Downloads\k3_tech_report.pdf` (25pp). Move it into the repo.
+- **Kimi K3 technical report** — primary architecture source. Tracked at the
+  repo root as `k3_tech_report.pdf` (25pp, added 2026-10-06).
   Sections that matter: §2.1.1 KDA, §2.1.2 Gated MLA, §2.2 AttnRes, §2.3 Stable
   LatentMoE, §2.3.3 + Fig. 5 QB, §2.5 Per-Head Muon, §3.2 scaling law, §3.3 recipe.
   Table 1 is the K2↔K3 architectural diff. §4–§7 are post-training, infra and evals —

@@ -101,14 +101,15 @@ checkpoint eval loop; retroactive M1 sweep via `modal run modal_app.py::sweep`).
 `::verify` ok) and a **shakeout trained**: 3250 steps at
 `backbone .735 / register .087 / general .178`, run `19d639b3`, val_loss
 2.78661 (M1 baseline: 2.80559 — headline val is Gutenberg-only and comparable).
-Its §7.2 curve and mundane-probe generations are on the volume, **not yet
-read**. What remains before A/B/C: the craft-essay slice (owner catalogue,
-§5.2.3), the preset rewrite over the full slice taxonomy (§4.2), and the
-owner's hand-written `register_exemplars.txt` (re-sweep both finished runs
-after the swap). `kda_mini.py` (Milestone 2) is compute-side and runs in
-parallel. The §7.2 gate on mix ablations is LIFTED — a mix run's curves can
-be scored on the axis that matters as long as it trains with the harness
-wired in.
+Its §7.2 curve and mundane-probe generations were **read 2026-09-29**
+(CHANGELOG, 2026-09-28 entry): the gap moved the wrong way (−0.5119 vs M1's
+−0.4119 at step 3000) and the mundane probe did not recover. What remains
+before A/B/C: the craft-essay slice (owner catalogue, §5.2.3), the preset
+rewrite over the full slice taxonomy (§4.2), and the owner's hand-written
+`register_exemplars.txt` (re-sweep both finished runs after the swap).
+`kda_mini.py` (Milestone 2) is compute-side and runs in parallel. The §7.2
+gate on mix ablations is LIFTED — a mix run's curves can be scored on the
+axis that matters as long as it trains with the harness wired in.
 
 ## Traps that have already cost time
 

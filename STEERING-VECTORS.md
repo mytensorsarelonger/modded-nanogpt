@@ -189,10 +189,11 @@ the representation toward the register, or only change the output distribution?*
 The tweet's between-checkpoint method needs same-context, two-checkpoint pairs.
 This project has:
 
-- **Within a run:** M1 baseline `21c92807`, dense checkpoints every 250 steps
-  (1000/2000/3000/3250). Baseline-vs-final is "what did training do to the
-  representation", directly comparable to the §7.2 gap curve that is *negative
-  across the whole curve* (−0.35 → −0.41 nats/tok, deepening).
+- **Within a run:** M1 baseline `21c92807`, checkpoints at 1000/2000/3000/3250.
+  Baseline-vs-final is "what did training do to the representation", directly
+  comparable to the §7.2 gap curve that is *negative across the whole curve*
+  (−0.355 at step 1000, −0.412 at 3000, −0.386 at 3250 nats/tok, over n = 2
+  contrast pairs: deepest at 3000, not monotone).
 - **Between runs:** M1 baseline vs the general-slice shakeout `19d639b3`
   (backbone .735 / register .087 / general .178, val 2.78661 vs 2.80559). The
   repo has already recorded that the general slice moved the §7.2 gap **the wrong
@@ -261,9 +262,10 @@ training — forward passes on Modal, `modal run`-shaped per AGENTS.md rule 1.
 
 **R2 — Extract the within-run curve vector and check it against the §7.2 gap.**
 Baseline ckpt 1000 vs 3250, same contexts. Prediction to falsify: if the
-contrast-pair gap deepens (−0.35 → −0.41), the between-checkpoint vector should
-point *away* from the exemplar direction. If the gap and the representation
-disagree, that is a finding about the harness, and worth more than the vector.
+contrast-pair gap deepens (−0.355 at 1000 → −0.386 at 3250, n = 2 pairs), the
+between-checkpoint vector should point *away* from the exemplar direction. If
+the gap and the representation disagree, that is a finding about the harness,
+and worth more than the vector.
 
 **R3 — Name the features, don't just locate them (higher cost).** Pass the
 register vector through an SAE and read the labels — the source's bag-of-features

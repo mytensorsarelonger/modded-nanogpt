@@ -10,6 +10,29 @@ from the code alone.
 
 ---
 
+## 2026-10-06 — Status drift fixed; K3 report tracked
+
+Found by the k3-lab drift check plus one by hand. Status lines kept naming
+finished work as next — the failure the 2026-09-17 entry fixed once already.
+
+- CHANGELOG order: the 2026-09-29 mix-literature entry sat below 2026-09-28.
+- PLAN.md "Next" still listed the §7.2 harness (built 2026-09-27); it now lists
+  what remains before A/B/C.
+- AGENTS.md said the shakeout curve was "not yet read"; it was read 2026-09-29
+  (`ceb2ad3`).
+- STEERING-VECTORS.md §3/§5 called the M1 gap curve "deepening" from −0.35 to
+  −0.41 and its checkpoints "every 250 steps". M1 has checkpoints at
+  1000/2000/3000/3250 only, and the gap bottoms at 3000 (−0.412) and recovers
+  to −0.386 at 3250. Every gap here is over n = 2 contrast pairs. PLAN.md §7.2
+  carried the same "deepening" line and said the baseline prefers the mundane
+  member of *every* pair; the cold-open pair's gap is positive at every M1
+  checkpoint (+0.17 → +0.11), so only the mundane pair does.
+- `k3_tech_report.pdf` is now tracked at the repo root (owner's call; the copy
+  comes from an open-source repo). PLAN.md Appendix B pointed at a Downloads
+  path that no longer exists.
+
+---
+
 ## 2026-10-02 — Field status check on Latent Introspection's open items (STEERING-VECTORS.md §7)
 
 Checked whether the work the *Latent Introspection* blog post deferred "to a
@@ -77,6 +100,43 @@ so the *method* stands on its own. The *claims* still do not.
 - Not started: no extractor exists, no vector has been computed, and R3 (SAE
   labelling) needs an SAE trained from scratch at this scale — deliberately
   gated behind R1/R2 showing a direction worth naming.
+
+---
+
+## 2026-09-29 — Mix-design literature digested (MIX-LITERATURE.md)
+
+Before designing Phase 1's mix ablations, read the field. Four papers,
+extracted from source and digested into `MIX-LITERATURE.md` (repo root, per
+the PAUSE-note precedent) — the *why* for what it recommends:
+
+- **Data Mixing Laws** (Ye et al., 2403.16952): loss per domain is an
+  exponential-of-linear function of mixture proportions, fit on ~24–32
+  sampled runs and predictive of unseen mixtures; nested with step/size
+  scaling laws it predicted a mixture worth 48% more training. Directly
+  portable — the §7.2 row already IS the domain-loss vector.
+- **Mixture repetition under data constraints** (Sedova et al., 2605.12715):
+  in *mixtures*, scarce target data tolerates 15–20 repetitions at optimum —
+  the ≤4-epoch rule in `mixing.py` is the single-source rule and likely
+  wrong for the register slice. Predicts M1's 8.7% under-exposed the
+  register and mix-b's r≈17 is in the optimal window. Hypothesis, not
+  assumption — nobody has measured repetition against a *discrimination*
+  objective; the sweep will.
+- **RegMix** (Liu et al., 2407.01492): 512 tiny proxies + ridge regression
+  beats hand selection and DoReMi at 10% cost; domain interactions contradict
+  common sense — the argument for a sampled sweep over hand-picked A/B/C
+  corners.
+- **To Repeat or Not To Repeat** (Muennighoff et al., 2305.13230): the source
+  of the ≤4 rule, and the caveat that data *quality* does not mitigate
+  repetition damage.
+
+PLAN.md §4.2 carries the design update: Phase 1 likely becomes a sampled
+response-surface sweep (R1) with A/B/C corners kept as anchors. **The
+owner-blocked preconditions are unchanged and remain first**: the hand-written
+exemplars (the objective the surface is fit against) and the craft-essay
+catalogue (the slice the surface must span). MIX-LITERATURE.md §5 has the
+caveats stated plainly — perplexity-objective findings may not transfer to
+the register-discrimination objective, and both repetition claims are
+single-group results pending our own measurement.
 
 ---
 
@@ -160,43 +220,6 @@ share, or schedule general into the cooldown only (the existing
 `cooldown-ramp` shape generalizes). The seeds are still PROVISIONAL — none
 of these numbers are evidence until `register_exemplars.txt` is the owner's
 writing; re-sweep both runs after the swap.
-
----
-
-## 2026-09-29 — Mix-design literature digested (MIX-LITERATURE.md)
-
-Before designing Phase 1's mix ablations, read the field. Four papers,
-extracted from source and digested into `MIX-LITERATURE.md` (repo root, per
-the PAUSE-note precedent) — the *why* for what it recommends:
-
-- **Data Mixing Laws** (Ye et al., 2403.16952): loss per domain is an
-  exponential-of-linear function of mixture proportions, fit on ~24–32
-  sampled runs and predictive of unseen mixtures; nested with step/size
-  scaling laws it predicted a mixture worth 48% more training. Directly
-  portable — the §7.2 row already IS the domain-loss vector.
-- **Mixture repetition under data constraints** (Sedova et al., 2605.12715):
-  in *mixtures*, scarce target data tolerates 15–20 repetitions at optimum —
-  the ≤4-epoch rule in `mixing.py` is the single-source rule and likely
-  wrong for the register slice. Predicts M1's 8.7% under-exposed the
-  register and mix-b's r≈17 is in the optimal window. Hypothesis, not
-  assumption — nobody has measured repetition against a *discrimination*
-  objective; the sweep will.
-- **RegMix** (Liu et al., 2407.01492): 512 tiny proxies + ridge regression
-  beats hand selection and DoReMi at 10% cost; domain interactions contradict
-  common sense — the argument for a sampled sweep over hand-picked A/B/C
-  corners.
-- **To Repeat or Not To Repeat** (Muennighoff et al., 2305.13230): the source
-  of the ≤4 rule, and the caveat that data *quality* does not mitigate
-  repetition damage.
-
-PLAN.md §4.2 carries the design update: Phase 1 likely becomes a sampled
-response-surface sweep (R1) with A/B/C corners kept as anchors. **The
-owner-blocked preconditions are unchanged and remain first**: the hand-written
-exemplars (the objective the surface is fit against) and the craft-essay
-catalogue (the slice the surface must span). MIX-LITERATURE.md §5 has the
-caveats stated plainly — perplexity-objective findings may not transfer to
-the register-discrimination objective, and both repetition claims are
-single-group results pending our own measurement.
 
 ---
 
