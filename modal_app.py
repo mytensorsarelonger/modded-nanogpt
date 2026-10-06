@@ -89,6 +89,11 @@ IMAGE_FILES = {
     "training_state.py": _IMAGE_SOURCE_ROOT / "training_state.py",
     "baseline_model.py": _IMAGE_SOURCE_ROOT / "baseline_model.py",
     "evals/exemplar.py": _IMAGE_SOURCE_ROOT / "evals" / "exemplar.py",
+    "evals/register_extract.py": _IMAGE_SOURCE_ROOT / "evals" / "register_extract.py",
+    # analysis/seed_band.py is imported by tests/test_seed_band.py (ed721ab,
+    # 2026-08-19), but was never added to this list — the suite could not
+    # collect in the container at all (the exact IMAGE_FILES trap above).
+    "analysis/seed_band.py": _IMAGE_SOURCE_ROOT / "analysis" / "seed_band.py",
     "evals/exemplar_data/register_exemplars.txt": _IMAGE_SOURCE_ROOT / "evals" / "exemplar_data" / "register_exemplars.txt",
     "evals/exemplar_data/craft_essays.txt": _IMAGE_SOURCE_ROOT / "evals" / "exemplar_data" / "craft_essays.txt",
     "data/mixing.py": _IMAGE_SOURCE_ROOT / "data" / "mixing.py",
@@ -191,6 +196,8 @@ image = (
     .add_local_file(IMAGE_FILES["training_state.py"], f"{REPO_DIR}/training_state.py", copy=True)
     .add_local_file(IMAGE_FILES["baseline_model.py"], f"{REPO_DIR}/baseline_model.py", copy=True)
     .add_local_file(IMAGE_FILES["evals/exemplar.py"], f"{REPO_DIR}/evals/exemplar.py", copy=True)
+    .add_local_file(IMAGE_FILES["evals/register_extract.py"], f"{REPO_DIR}/evals/register_extract.py", copy=True)
+    .add_local_file(IMAGE_FILES["analysis/seed_band.py"], f"{REPO_DIR}/analysis/seed_band.py", copy=True)
     .add_local_file(IMAGE_FILES["evals/exemplar_data/register_exemplars.txt"], f"{REPO_DIR}/evals/exemplar_data/register_exemplars.txt", copy=True)
     .add_local_file(IMAGE_FILES["evals/exemplar_data/craft_essays.txt"], f"{REPO_DIR}/evals/exemplar_data/craft_essays.txt", copy=True)
     # manifest.jsonl (~5 MB) is what makes `data_manifest_hash` in the run
@@ -1043,6 +1050,220 @@ def sweep(run_id: str, checkpoint_every: int = 0,
                                            checkpoint_every=checkpoint_every,
                                            git_sha=git_sha,
                                            git_dirty=git_dirty),
+                     indent=2))
+
+
+# ---------------------------------------------------------------------------
+# K-B/01 steering pre-registration artifacts (prereg-R1-R2.md §3.1 items 1
+# and 3): per-context layer means (register_acts.jsonl) and the θ_A
+# covariance (register_covariance_<step>.npz). Eval-only, register_sweep
+# pattern. K-B/03 (steered re-scoring + the OTM sweep) extends the
+# checkpoint loop below.
+# ---------------------------------------------------------------------------
+
+# prereg §3.1 item 1: C is exactly the eval set — 4 pair members + 3 craft.
+_EXPECTED_CONTEXTS = 7
+_EXPECTED_DIGEST = "1e618cc9d92c7619"
+
+
+@app.function(
+    gpu=SMOKE_GPU,          # eval-only; an L4 is plenty and cheapest
+    timeout=45 * 60,
+    volumes=VOLUMES,
+    secrets=SECRETS,
+    cpu=4.0,
+    memory=16384,
+    retries=0,
+)
+def register_extract(m1_run: str, sk_run: str, r1_step: int = 3250,
+                     git_sha: str = _GIT_SHA,
+                     git_dirty: bool = _GIT_DIRTY) -> dict:
+    """Extract steering artifacts for the R1/R2 pre-registration.
+
+    Per (run, step) in the prereg §3.1 plan — acts at (M1, 1000), (M1,
+    r1_step), (M1, 3250), (SK, r1_step) de-duplicated; covariance at (M1,
+    1000) and (M1, r1_step) — loads the checkpoint once, appends its row to
+    runs/<run_id>/register_acts.jsonl, and (for a covariance checkpoint)
+    writes runs/<m1_run>/register_covariance_<step:05d>.npz. The k3-lab
+    dispatcher recomputes every other number locally from these files
+    (prereg rule 10).
+
+    git_sha/git_dirty default to the LOCAL module globals for the same
+    reason as register_sweep: Modal re-imports the module inside the
+    container where `.git` does not exist.
+    """
+    import time
+
+    import torch
+    import tiktoken
+    # cwd + sys.path FIRST: baseline_model / evals live in REPO_DIR, and the
+    # contamination guard + config import resolve via cwd — these imports
+    # must not precede the path setup (cost a real sweep launch 2026-09-27).
+    os.chdir(REPO_DIR)
+    sys.path.insert(0, REPO_DIR)
+    from baseline_model import GPT
+    from evals.exemplar import (
+        eval_set_digest,
+        load_passages,
+        assert_clean,
+        append_jsonl,
+    )
+    from evals.register_extract import (
+        LAYER_CONVENTION,
+        acts_contexts,
+        layer_covariance,
+        offtarget_windows,
+        save_covariance,
+    )
+    from config import config
+
+    timings: dict[str, float] = {}
+    t0 = time.perf_counter()
+    runs_vol.reload()
+    m1_dir = Path(RUNS_MOUNT) / m1_run
+    if not m1_dir.is_dir():
+        raise FileNotFoundError(f"no such run directory on the runs volume: {m1_dir}")
+    if not (Path(RUNS_MOUNT) / sk_run).is_dir():
+        raise FileNotFoundError(
+            f"no such run directory on the runs volume: {Path(RUNS_MOUNT) / sk_run}"
+        )
+
+    device = torch.device("cuda")
+    enc = tiktoken.get_encoding(config.tokenizer_name)
+    exemplar_file = Path(REPO_DIR) / "evals" / "exemplar_data" / "register_exemplars.txt"
+    craft_file = Path(REPO_DIR) / "evals" / "exemplar_data" / "craft_essays.txt"
+
+    # Guard BEFORE extraction: a contaminated passage would put memorized
+    # activations into every vector this produces.
+    all_passages = load_passages(exemplar_file) + load_passages(craft_file)
+    assert_clean(all_passages, enc, "data/shards/gutenberg_train_*.bin")
+    digest = eval_set_digest([exemplar_file, craft_file])
+    timings["guard"] = time.perf_counter() - t0
+    print(f"[extract] guard: {len(all_passages)} passages clean, digest {digest} "
+          f"({timings['guard']:.1f}s)")
+
+    if digest != _EXPECTED_DIGEST:
+        raise ValueError(
+            f"eval set digest {digest} != {_EXPECTED_DIGEST} — the eval set "
+            "changed; C must stay fixed across checkpoints (prereg §2.1)"
+        )
+
+    model = GPT(vocab_size=config.vocab_size, num_layers=config.num_layers,
+                model_dim=config.model_dim, head_dim=config.head_dim,
+                num_heads=config.num_heads).to(device)
+    model.eval()
+
+    # The prereg §3.1 plan, de-duplicated by (run, step).
+    acts_plan = list(dict.fromkeys([
+        (m1_run, 1000),
+        (m1_run, r1_step),
+        (m1_run, 3250),
+        (sk_run, r1_step),
+    ]))
+    cov_steps = {1000, r1_step}   # θ_A checkpoints, both on M1
+
+    acts_done: list[list] = []
+    cov_paths: list[str] = []
+    for run_id, step in acts_plan:
+        checkpoint = f"ckpt_{step:05d}.pt"
+        ck = Path(RUNS_MOUNT) / run_id / checkpoint
+        if not ck.is_file():
+            raise FileNotFoundError(f"no such checkpoint on the runs volume: {ck}")
+
+        t_ck = time.perf_counter()
+        payload = torch.load(ck, map_location=device, weights_only=True)
+        if payload.get("format", 1) < 3:
+            state = payload.get("model_state_dict") or payload.get("model")
+        else:
+            state = payload["model_state_dict"]
+        model.load_state_dict(state)
+        timings[f"load_{run_id[:8]}_{step}"] = time.perf_counter() - t_ck
+        print(f"[extract] {run_id[:8]}/{checkpoint}: loaded "
+              f"({timings[f'load_{run_id[:8]}_{step}']:.1f}s)")
+
+        t_acts = time.perf_counter()
+        contexts = acts_contexts(model, enc, exemplar_file, craft_file,
+                                 seq_len=config.seq_len, device=device)
+        if len(contexts) != _EXPECTED_CONTEXTS:
+            raise ValueError(
+                f"{len(contexts)} contexts != {_EXPECTED_CONTEXTS} — C is "
+                "exactly the pairs plus the craft passages (prereg §2.1)"
+            )
+        append_jsonl(Path(RUNS_MOUNT) / run_id / "register_acts.jsonl", {
+            "run_id": run_id,
+            "step": step,
+            "checkpoint": checkpoint,
+            "eval_set_digest": digest,
+            "seq_len": config.seq_len,
+            "model_dim": config.model_dim,
+            "num_layers": config.num_layers,
+            "layer_convention": LAYER_CONVENTION,
+            "harness_git_sha": git_sha,
+            "harness_git_dirty": git_dirty,
+            "swept": True,
+            "contexts": contexts,
+        })
+        acts_done.append([run_id, step])
+        timings[f"acts_{run_id[:8]}_{step}"] = time.perf_counter() - t_acts
+        print(f"[extract] {run_id[:8]}/{checkpoint}: acts for "
+              f"{len(contexts)} contexts appended "
+              f"({timings[f'acts_{run_id[:8]}_{step}']:.1f}s)")
+
+        if run_id == m1_run and step in cov_steps:
+            t_cov = time.perf_counter()
+            windows, window_source = offtarget_windows(
+                "data/shards/gutenberg_train_*.bin", n_windows=32,
+                window=config.seq_len)
+            cov = layer_covariance(model, windows, device, batch=8,
+                                   exclude_position=0)
+            if cov["count"] != 32 * (config.seq_len - 1):
+                raise ValueError(
+                    f"covariance count {cov['count']} != "
+                    f"{32 * (config.seq_len - 1)} retained tokens"
+                )
+            cov_path = Path(RUNS_MOUNT) / m1_run / f"register_covariance_{step:05d}.npz"
+            save_covariance(cov_path, cov, step=step,
+                            window_tokens=config.seq_len,
+                            excluded_position=0,
+                            window_source=window_source)
+            cov_paths.append(str(cov_path))
+            timings[f"cov_{run_id[:8]}_{step}"] = time.perf_counter() - t_cov
+            print(f"[extract] {run_id[:8]}/{checkpoint}: covariance "
+                  f"(count {cov['count']}) saved to {cov_path.name} "
+                  f"({timings[f'cov_{run_id[:8]}_{step}']:.1f}s)")
+
+    # --- steering / OTM (K-B/03) ---
+    # Steered re-scoring, random/negated controls, and the OTM(α) sweep go
+    # here: they extend this checkpoint loop over the SAME loaded model,
+    # checkpoint plan, and eval set (prereg §3.1 items 2 and 4).
+
+    runs_vol.commit()
+    print("[extract] runs volume committed")
+    return {
+        "acts": acts_done,
+        "covariance": cov_paths,
+        "timings_s": {k: round(v, 2) for k, v in timings.items()},
+        "eval_set_digest": digest,
+    }
+
+
+@app.local_entrypoint()
+def extract(m1_run: str = "21c92807-418e-49ce-a78b-566b376f0914",
+            sk_run: str = "19d639b3-a870-4c35-bcf6-39180d1d4e24",
+            r1_step: int = 3250,
+            git_sha: str = _GIT_SHA, git_dirty: bool = _GIT_DIRTY):
+    """CLI: modal run modal_app.py::extract [--m1-run <uuid> ...]
+
+    git identity passed EXPLICITLY: register_extract's parameter defaults
+    re-evaluate in the container, where .git does not exist (measured
+    2026-09-27: rows landed with harness_git_sha=""). The local
+    entrypoint runs on the launching machine, where _GIT_SHA is real —
+    same argument-flow pattern as sweep().
+    """
+    print(json.dumps(register_extract.remote(m1_run=m1_run, sk_run=sk_run,
+                                             r1_step=r1_step,
+                                             git_sha=git_sha,
+                                             git_dirty=git_dirty),
                      indent=2))
 
 
