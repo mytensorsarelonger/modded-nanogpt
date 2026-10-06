@@ -10,6 +10,39 @@ from the code alone.
 
 ---
 
+## 2026-10-06 — Correction: shakeout pair attribution (2026-09-28 entry)
+
+The 2026-09-28 entry read the shakeout's §7.2 curves with the pair attribution
+backwards. What stands: the shakeout's mean gap (ḡ, unweighted over the n = 2
+seed pairs) is below M1's at every matched step — Δḡ = −0.102 at 1000,
+−0.060 at 2000, −0.100 at 3000 — and the cold-open pair flipped from positive
+to negative by step 3000 (M1 +0.106 → shakeout −0.186).
+
+What was wrong: it is the **cold-open** pair, not the mundane pair, that
+carries the shakeout-vs-M1 difference at all three matched steps (|Δg/n| =
+0.073 / 0.073 / 0.146 for cold-open, vs 0.029 / 0.012 / 0.046 for mundane).
+At 2000 and 3000 the shakeout's mundane gap is *less* negative than M1's
+(−0.849 vs −0.874; −0.838 vs −0.930).
+
+The quoted "−0.94 → −0.84" is the shakeout's own 1000 → 3000 change in the
+mundane gap, not a matched-step comparison against M1 — and moving from
+−0.939 to −0.838 is a *weakening* of the preference for the mundane contrast
+member, not the strengthening the entry states.
+
+Consequence: the mechanism sentence ("raises P(mundane contrast) without
+touching P(register)") and the "buys mundane fluency at a cost" premise of
+the A/B/C interpretation are not supported by the pair-level numbers. The
+move to explain is the cold-open pair's; no replacement mechanism is
+proposed here.
+
+Caveats: n = 2 provisional seed pairs, not the owner's exemplars; the M1
+rows come from a retroactive sweep on a dirty harness while the shakeout's
+were logged live; the shakeout has no step-3250 row. Numbers from k3-lab
+`paper/steering/checks/check_gap.py` (E3) re-run against the fetched
+`modal_out/*/register_eval.jsonl`.
+
+---
+
 ## 2026-10-06 — Field status refresh (STEERING-VECTORS.md §7)
 
 §7's ~15 factual claims about other people's work carried no links, so none of
