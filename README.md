@@ -27,10 +27,10 @@ measured (range 0.00198 at 1,000 steps — single-seed ablations are defensible)
 
 ### Two rules that will save you a day
 
-1. **Run nothing locally.** The dev box is Windows; every local execution path
-   here has cost real time (cp1252 crashes ×3, MSYS2 path mangling misrouting
-   890 MB, a platform-split torch pin). This machine edits files and invokes
-   `modal run`. See CHANGELOG *2026-08-06 → Lesson*.
+1. **Run nothing locally.** The dev box is a Mac; every local execution path
+   here has cost real time (encoding crashes, path mangling misrouting
+   890 MB of uploads, a broken session PYTHONPATH). This machine edits files
+   and invokes `modal run`. See CHANGELOG *2026-08-06 → Lesson*.
 2. **`train_baseline.py` is a control arm.** Improving the model there is a
    *defect*, not a contribution. See HANDOFF.md.
 

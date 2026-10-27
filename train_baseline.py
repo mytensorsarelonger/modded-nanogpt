@@ -243,7 +243,7 @@ assert 8 % dist.get_world_size() == 0
 def device_name() -> str:
     return torch.cuda.get_device_name(device) if CUDA else "CPU"
 
-# torch.compile needs Triton on CUDA and MSVC on Windows. Off by default under
+# torch.compile needs Triton on CUDA. Off by default under
 # SMOKE, since inductor buys nothing for a ten-step correctness check.
 COMPILE = os.environ.get("COMPILE", "0" if SMOKE else "1") == "1"
 
@@ -269,7 +269,7 @@ print0("="*100)
 
 seq_len = config.seq_len
 # SMOKE shrinks the batch so a correctness pass fits in CPU RAM. Overridable
-# individually so a mid-size debug run on the 4090 needs no code change either.
+# individually so a mid-size debug run needs no code change either.
 batch_size = int(os.environ.get("BATCH_SIZE", 64 * 1024 if SMOKE else config.batch_size))
 mbs = int(os.environ.get("MBS", 1 if SMOKE and not CUDA else config.mbs))
 _granule = distributed_batch_granule(seq_len, mbs, dist.get_world_size())
@@ -782,8 +782,8 @@ for _ in range(num_trials):
 
         model.eval()
         # encoding is mandatory, not cosmetic: a byte-BPE vocab emits arbitrary
-        # Unicode, especially from a randomly-initialised model, and the Windows
-        # cp1252 default turns the primary instrument into a crash.
+        # Unicode, especially from a randomly-initialised model, and a narrow
+        # platform default encoding turns the primary instrument into a crash.
         with open(sample_log_path, "a", encoding="utf-8") as f:
             f.write(f"\n{'='*72}\nStep {step}"
                     f"{'  (+ held-out)' if include_heldout else ''}\n{'='*72}\n")

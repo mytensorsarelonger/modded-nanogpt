@@ -23,17 +23,16 @@ launcher retains a local source check for that exact regression and now also:
   CLI needs, and `modal` fails at import. Empty it for the invocation; nothing
   in the launcher depends on the session's path.
 
-The runtime is pinned to **PyTorch 2.13.0** on Linux and Windows. PyTorch 2.10
+The runtime is pinned to **PyTorch 2.13.0**. PyTorch 2.10
 is not a valid fallback: its compiled graph produced non-finite weights on the
-second optimizer update, while its Windows wheel also failed Gloo setup with
-`unsupported gloo device`. The 2.13 CUDA path—Gloo collectives, fused AdamW,
+second optimizer update. The 2.13 CUDA path—Gloo collectives, fused AdamW,
 bf16 Newton–Schulz, TorchInductor, checkpointing, and sampling—has run on real
 L4 and A100 hardware. Keeping Gloo preserves the control arm's configured
 backend and config hash.
 
 Run this cheap local gate before uploading or allocating a GPU:
 
-```powershell
+```bash
 python -c "import modal_app; print('modal_app preflight OK')"
 modal run modal_app.py::train --help
 ```
@@ -42,7 +41,7 @@ modal run modal_app.py::train --help
 
 ## 1. Prerequisites
 
-```powershell
+```bash
 pip install modal
 modal setup            # opens a browser; writes ~/.modal.toml
 ```
@@ -56,7 +55,7 @@ You need:
 
 Sanity check without touching a GPU:
 
-```powershell
+```bash
 python -c "import ast;ast.parse(open('modal_app.py',encoding='utf-8').read());print('ok')"
 ```
 
@@ -80,23 +79,14 @@ instead.
 `config.validate_against_shards()` reads `shard_dir / "manifest.json"`, and
 `shard_dir` is `data/shards`, which is the volume mount point.
 
-```powershell
+```bash
 # creates the volume if it does not exist
 modal volume create k3mini-shards
 
-foreach ($f in Get-ChildItem data\shards\*.bin) {
-    modal volume put k3mini-shards $f.FullName "/$($f.Name)"
-}
-modal volume put k3mini-shards data\shards\manifest.json /manifest.json
-
-modal volume ls k3mini-shards
-```
-
-Bash equivalent:
-
-```bash
 for f in data/shards/*.bin; do modal volume put k3mini-shards "$f" "/$(basename "$f")"; done
 modal volume put k3mini-shards data/shards/manifest.json /manifest.json
+
+modal volume ls k3mini-shards
 ```
 
 Expect roughly 10–40 minutes on a home upstream link. If a file fails, re-put
@@ -104,7 +94,7 @@ that one file; the loop is per-file precisely so a failure is cheap.
 
 Then verify, which is the step that actually tells you the upload worked:
 
-```powershell
+```bash
 modal run modal_app.py::verify
 ```
 
@@ -115,16 +105,16 @@ byte size and **sha256** against it. `--no-checksums` does presence+size only
 The other two volumes (`k3mini-runs`, `k3mini-torch-cache`) are created
 automatically on first use by `create_if_missing=True`.
 
-> Note: `manifest.json` records absolute *Windows* shard paths
-> (`C:\Users\...`). This is harmless — `config.py` never reads `shard_path`, and
-> the dataloader globs `Path.cwd()`. Only the basenames matter, and `verify`
-> compares basenames.
+> Note: `manifest.json` records absolute *backslash* shard paths
+> (`C:\Users\...`), written by the old Windows data box. This is harmless —
+> `config.py` never reads `shard_path`, and the dataloader globs
+> `Path.cwd()`. Only the basenames matter, and `verify` compares basenames.
 
 ---
 
 ## 3. Smoke test first — always
 
-```powershell
+```bash
 modal run modal_app.py::smoke
 ```
 
@@ -154,7 +144,7 @@ plumbing test.
 
 More steps if you want a rough throughput reading before committing:
 
-```powershell
+```bash
 modal run modal_app.py::smoke --train-steps 300
 ```
 
@@ -162,7 +152,7 @@ modal run modal_app.py::smoke --train-steps 300
 
 ## 4. The full run
 
-```powershell
+```bash
 modal run --detach modal_app.py::train
 ```
 
@@ -173,7 +163,7 @@ killing the worker in the first place. Reattach with `modal app logs <app-id>`
 
 Overridable:
 
-```powershell
+```bash
 modal run --detach modal_app.py::train --train-steps 1000      # shorter run
 modal run --detach modal_app.py::train --mbs 16                # 80GB cards only
 modal run --detach modal_app.py::train --no-compile            # eager, for debugging
@@ -184,7 +174,7 @@ Resume paths are always relative to the `k3mini-runs` Volume; absolute paths and
 `..` are rejected. Resume from the newest checkpoint in a prior run directory,
 or name one exactly:
 
-```powershell
+```bash
 modal run --detach modal_app.py::train --resume auto --resume-dir <run_id>
 modal run --detach modal_app.py::train --resume <run_id>/ckpt_01000.pt
 ```
@@ -206,7 +196,7 @@ Configuration, and why:
 
 Watch it:
 
-```powershell
+```bash
 modal app list
 modal app logs <app-id>
 ```
@@ -308,9 +298,9 @@ Small text artifacts — `runs/index.jsonl`, every `samples.log`, the launcher
 provenance sidecar, and the 5 most recent `logs/*.txt` (each contains the full source of
 the script that produced it):
 
-```powershell
-modal run modal_app.py::fetch                       # -> .\modal_out\
-modal run modal_app.py::fetch --dest .\pulled
+```bash
+modal run modal_app.py::fetch                       # -> ./modal_out/
+modal run modal_app.py::fetch --dest ./pulled
 modal run modal_app.py::fetch --no-include-logs
 ```
 
@@ -322,10 +312,10 @@ container.
 Checkpoints are ~1.4 GB each and are deliberately *not* returned by `fetch`
 (it lists them instead). Pull one explicitly:
 
-```powershell
+```bash
 modal volume ls k3mini-runs
-modal volume get k3mini-runs <run_id>/ckpt_03250.pt .\runs\<run_id>\
-modal volume get k3mini-runs index.jsonl .\
+modal volume get k3mini-runs <run_id>/ckpt_03250.pt ./runs/<run_id>/
+modal volume get k3mini-runs index.jsonl ./
 ```
 
 ### Where things land in the runs volume
@@ -348,7 +338,7 @@ runs/                              <- k3mini-runs volume
 before the harness existed — the Milestone 1 baseline — the same curve is
 produced retroactively from the checkpoints already on the volume:
 
-```powershell
+```bash
 modal run modal_app.py::sweep --run-id 21c92807-418e-49ce-a78b-566b376f0914
 # stride for dense-checkpoint runs:
 modal run modal_app.py::sweep --run-id <uuid> --checkpoint-every 500

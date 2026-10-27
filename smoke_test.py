@@ -16,7 +16,7 @@ wrote train_baseline_smoke.py, and ran that. Two problems killed it:
 
 Everything the patches used to do is now a runtime switch in train_baseline.py:
 device detection, COMPILE, SMOKE, TRAIN_STEPS, BATCH_SIZE, MBS. So the smoke
-path and the Colab/4090 path are provably the same code.
+path and the Colab path are provably the same code.
 
 Usage:
     python smoke_test.py                 # 10 steps, auto device

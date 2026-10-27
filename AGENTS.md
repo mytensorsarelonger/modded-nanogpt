@@ -41,11 +41,12 @@ third file.
 
 ## Four hard rules
 
-1. **Run nothing locally.** The dev box is Windows 11 and is not the compute box. Every
-   local execution path here has cost real time: cp1252 encoding crashes ×3, MSYS2 path
-   mangling that misrouted 890 MB of uploads, a platform-split torch pin. This machine
-   **edits files and invokes `modal run`.** Tests are the one exception and they run on
-   Modal too (`modal run modal_app.py::tests`).
+1. **Run nothing locally.** The dev box is a Mac and is not the compute box.
+   Local execution has cost real time on every box this project has lived on
+   (encoding crashes, path mangling that misrouted 890 MB of uploads, a broken
+   session PYTHONPATH — see Traps). This machine **edits files and invokes
+   `modal run`.** Tests are the one exception and they run on Modal too
+   (`modal run modal_app.py::tests`).
 2. **`train_baseline.py` is a control arm, not a model.** It is deliberately untuned.
    **A change that makes the model better is a defect here** — it destroys
    comparability with every measurement already taken. Improvements belong in the
@@ -103,19 +104,41 @@ checkpoint eval loop; retroactive M1 sweep via `modal run modal_app.py::sweep`).
 2.78661 (M1 baseline: 2.80559 — headline val is Gutenberg-only and comparable).
 Its §7.2 curve and mundane-probe generations were **read 2026-09-29**
 (CHANGELOG, 2026-09-28 entry): the gap moved the wrong way (−0.5119 vs M1's
-−0.4119 at step 3000) and the mundane probe did not recover. What remains
-before A/B/C: the craft-essay slice (owner catalogue, §5.2.3), the preset
-rewrite over the full slice taxonomy (§4.2), and the owner's hand-written
-`register_exemplars.txt` (re-sweep both finished runs after the swap).
-`kda_mini.py` (Milestone 2) is compute-side and runs in parallel. The §7.2
-gate on mix ablations is LIFTED — a mix run's curves can be scored on the
-axis that matters as long as it trains with the harness wired in.
+−0.4119 at step 3000) and the mundane probe did not recover. **Corrected
+2026-10-06** (CHANGELOG, same date): the wrong-way move is carried by the
+**cold-open** pair, not the mundane pair, and the "buys mundane fluency at a
+cost" mechanism is NOT supported by the pair-level numbers. No replacement
+mechanism is proposed; the Aug 12 public bet (patch the mix → mundane
+collapse goes away) is still open.
+
+**Second track — steering pre-registration (October).** k3-lab's R1/R2 prereg
+(`paper/steering/prereg-R1-R2.md`, in the k3-lab repo, **not checked out on
+this machine**) pairs every layer claim with a behavioural check and an
+off-target-mass report. This repo ships forward-pass artifacts only (prereg
+rule 10): `modal run modal_app.py::extract` writes `register_acts.jsonl`,
+`register_covariance_<step>.npz` (θ_A), `steer_rescore.json` (72 rows/regime:
+12 layers × {v, −v, 0, rand×3}, §7.2 re-run under steering, plus OTM(α)),
+and `steer_continuations.jsonl` (owner reads; never code-scored, prereg rule
+8). The verdict is computed in k3-lab (`check_kb.py`). **Eval-only; not yet
+run.** Literature digests landed alongside: MIX-LITERATURE.md and
+STEERING-VECTORS.md (with the Latent Introspection field-status check, §7).
+
+**What remains before A/B/C:** the craft-essay slice — catalogue assembled
+(`craft_candidates.md`, ~119 PG-verified rows, 2026-09-29; **owner veto is
+the pending step**, then the §5.1.2 pipeline) — the §4.2 preset rewrite over
+the full slice taxonomy, and the owner's hand-written `register_exemplars.txt`
+(re-sweep both finished runs after the swap). `kda_mini.py` (Milestone 2) is
+compute-side and runs in parallel. The §7.2 gate on mix ablations is LIFTED —
+a mix run's curves can be scored on the axis that matters as long as it
+trains with the harness wired in.
 
 ## Traps that have already cost time
 
-- **Windows paths in artifacts are unparseable on Linux.** `Path("a\b\c.bin").name`
-  returns the whole string on POSIX. Glob our own naming convention instead of trusting
-  a `shard_path` from the manifest — `data/mix_loader.py` does this deliberately.
+- **Backslash paths in old artifacts are unparseable on Linux.** The manifest and
+  older artifacts were written by a previous Windows data box and carry absolute
+  `C:\...` paths; `Path("a\b\c.bin").name` returns the whole string on POSIX.
+  Glob our own naming convention instead of trusting a `shard_path` from the
+  manifest — `data/mix_loader.py` does this deliberately.
 - **`.gitignore` patterns with a single `*` do not cross directory separators.**
   `data/shards*/*.bin` missed `by_slice/` entirely; 882 MB sat untracked-but-not-ignored,
   one `git add -A` from entering history permanently.
@@ -125,9 +148,14 @@ axis that matters as long as it trains with the harness wired in.
   index file overwrite each other — that is why `run.json` is the source of truth.
 - **`torch.compile` NaN'd on torch 2.10.0+cu128/sm89** at the second optimizer update.
   Fixed by pinning **torch 2.13.0**. Don't unpin casually.
-- **PowerShell quoting breaks inline Python.** Use a heredoc via the Bash tool, or a
-  file. This has discarded a queued Modal run once.
-- **pytest needs `--basetemp`** pointed somewhere writable on this box (WinError 5).
+- **hf_hub 1.x Xet finalization rewrites "finished" files.** Bulk-downloaded .bin
+  files kept changing for minutes after reaching full size; hashes oscillated
+  between two complete, valid-looking byte-sets. Wait for the downloader process
+  to EXIT before hashing, and hash from terminal-side `sha256sum`, not the agent
+  kernel (it saw stale content the terminal never saw). Will bite again on the
+  next bulk download (craft slice).
+- **The Hermes session's PYTHONPATH breaks the modal CLI** (its `watchfiles`
+  shadows the working one). Prefix every modal invocation: `PYTHONPATH= modal run ...`.
 
 ## Conventions
 

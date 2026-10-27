@@ -101,18 +101,16 @@ project legible to funders even if the literary result is subjective.
 
 | Resource | Reality |
 |---|---|
-| **Windows laptop** (this box) | RTX 4070 Laptop, **8 GB** VRAM. Windows 11, Python 3.13, no torch/triton/tiktoken, no WSL. **Data pipeline and authoring only** — not a training machine. |
-| RTX 4090 | 24 GB VRAM. The dev box. Kernel development, debug runs, correctness harnesses. Confirm CUDA + Linux/WSL2 before Phase 0. |
+| **Mac** (this box) | Apple Silicon. **Authoring and orchestration only** — not a training machine. Edits files and invokes `modal run` (AGENTS.md rule 1). |
+| ~~RTX 4090~~ | Never used. Training moved to rented Modal GPUs before Phase 0 ran (§8, Milestone 1 amendment). |
 | DGX Spark | 128 GB unified memory, ~273 GB/s bandwidth. Poor for training throughput. Use for fitting/inspecting larger configs and running Kimi Linear locally. |
 | Rented H100s | The real training substrate. ~$3–4/GPU-hr on Modal. |
 | Budget | Limited. Requires a proposal. **The proposal gets written after Phase 1**, with a real loss curve and real sampled prose in it. |
 | Time | Evenings and weekends. Sustained, not intense. |
 
-**Two platform facts that bite immediately.** Both `train_gpt_simple.py` and HEAD call
-`dist.init_process_group(backend="nccl")`, and **NCCL is Linux-only** — this fails at
-startup on native Windows even at `world_size=1`. And `torch.compile` needs Triton plus
-MSVC on Windows. Consequence: **do the training on Linux or WSL2**, not native Windows.
-`wsl.exe --install` on the 4090 box is a better investment than fighting either.
+**Platform fact that bites immediately.** Both `train_gpt_simple.py` and HEAD call
+`dist.init_process_group(backend="nccl")`, and **NCCL is Linux-only**. Consequence:
+training runs on Modal's Linux containers, never on the dev box (AGENTS.md rule 1).
 
 **Governing risk:** solo from-scratch projects die in data engineering — six months
 of pipeline work, an ever-growing corpus, no model. The entire plan below is
@@ -660,7 +658,7 @@ is a valid way to add one; the loader does not care where they came from.
 
 Note (2) is the only fiddly part, and note that `MixingLoader` **globs its own naming
 convention** rather than trusting `shard_path` — those paths are written by whatever
-machine tokenized the corpus, and a Windows path is unparseable on Linux
+machine tokenized the corpus, and a backslash path is unparseable on Linux
 (CHANGELOG 2026-08-13). So the paths in the manifest are documentation; the filenames
 are the contract.
 
@@ -1190,8 +1188,7 @@ strategy, the post-training ladder, and the condensed field survey live in
   LatentMoE, §2.3.3 + Fig. 5 QB, §2.5 Per-Head Muon, §3.2 scaling law, §3.3 recipe.
   Table 1 is the K2↔K3 architectural diff. §4–§7 are post-training, infra and evals —
   not needed yet.
-  *Extract text with `pdftotext -layout` (present in Git-for-Windows at
-  `/mingw64/bin`); `pdftoppm`/poppler is not installed.*
+  *Extract text with `pdftotext -layout` (`brew install poppler`).*
 - Kimi Linear (arXiv 2510.26692) — KDA's origin, and the closest runnable ancestor.
   Needed for the UT transform and the full chunkwise derivation, which K3 §2.1.1
   explicitly defers to it.
@@ -1284,4 +1281,5 @@ scripts land in `~/.local/bin`, which often isn't on PATH.
 - Do not try to out-curate FineWeb-Edu on general web text.
 - Do not write the funding proposal before Phase 1 exists.
 - Do not skip the general-text slice in pursuit of purity.
-- Do not try to train on native Windows. NCCL is Linux-only.
+- Do not train on the dev box. Training runs on Modal's Linux containers; NCCL is
+  Linux-only.

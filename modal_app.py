@@ -140,8 +140,8 @@ _COMMON_CHECKPOINT = re.compile(r"ckpt_\d+\.pt\Z")
 # Version pinning rationale:
 #
 #  torch==2.13.0   Matches requirements.txt and is the first verified runtime
-#                  for both compiled CUDA training and Windows Gloo. Torch 2.10
-#                  produced non-finite weights on the second compiled update.
+#                  for compiled CUDA training. Torch 2.10 produced non-finite
+#                  weights on the second compiled update.
 #                  torch is
 #                  the one dependency where an unpinned float is genuinely
 #                  dangerous: inductor codegen, `F.rms_norm`, the `device_id=`
@@ -175,8 +175,8 @@ image = (
         # every time you toggled WANDB. One rebuild now, stable thereafter; the
         # trainer only imports it when WANDB=1.
         "wandb==0.19.11",
-        # So the suite can run in the real environment. The dev box is Windows and
-        # nothing there is representative; see CHANGELOG 2026-08-06 "Lesson".
+        # So the suite can run in the real environment. Nothing on the dev box
+        # is representative; see CHANGELOG 2026-08-06 "Lesson".
         "pytest==8.3.4",
     )
     # Bake the GPT-2 BPE files into the image. Without this, every container
@@ -212,7 +212,7 @@ image = (
     .add_local_file(IMAGE_FILES["data/shard_writer.py"], f"{REPO_DIR}/data/shard_writer.py", copy=True)
     .add_local_file(IMAGE_FILES["data/manifest.jsonl"], f"{REPO_DIR}/data/manifest.jsonl", copy=True)
     .add_local_file(IMAGE_FILES["data/val_books.json"], f"{REPO_DIR}/data/val_books.json", copy=True)
-    # The suite runs HERE, not on the dev box. Windows is unrepresentative of the
+    # The suite runs HERE, not on the dev box, which is unrepresentative of the
     # training environment in every way that has already cost this project time
     # (see CHANGELOG 2026-08-06 "Lesson"), so "the tests pass" should mean they
     # passed on the image that trains.
@@ -815,9 +815,9 @@ def run_tests(target: str = "tests", verbose: bool = False,
     """Run the pytest suite inside the training image. CPU only — no GPU cost.
 
     Exists because of the standing rule that nothing meaningful runs on the dev
-    box. A suite that only ever passed on Windows says nothing about the runtime
-    that actually trains: different OS, different torch build, different default
-    encoding.
+    box. A suite that only ever passed on the dev box says nothing about the
+    runtime that actually trains: different OS, different torch build, different
+    default encoding.
     """
     import subprocess as sp
     # Split so several paths can be passed as one --target argument; pytest takes
@@ -883,7 +883,8 @@ def verify_data(checksums: bool = True) -> dict:
 
     results, ok = [], True
     for kind, entry, subdir in targets:
-        # manifest.json records absolute *Windows* shard paths. Only the
+        # manifest.json records absolute backslash shard paths (written by the
+        # old Windows data box). Only the
         # basename is portable, and it is all that is needed: config.py
         # never reads shard_path, and the dataloader globs.
         name = entry["shard_path"].replace("\\", "/").rsplit("/", 1)[-1]

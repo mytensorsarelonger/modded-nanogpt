@@ -24,7 +24,7 @@ import json
 import hashlib
 from pathlib import Path
 
-# Windows defaults stdout to cp1252 and this script prints book titles, which is
+# A narrow platform default stdout encoding (cp1252) plus book titles is
 # exactly what killed the Gutenberg download at 371/3000 on a title containing a
 # macron. Same guard as download_gutenberg.py and train_baseline.py.
 for _stream in (sys.stdout, sys.stderr):

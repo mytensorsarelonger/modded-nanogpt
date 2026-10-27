@@ -13,9 +13,10 @@ import json
 import requests
 from pathlib import Path
 
-# Windows defaults stdout to cp1252, so printing a title containing a macron,
-# CJK glyph or anything else outside Latin-1 raises UnicodeEncodeError and kills
-# the run. This corpus is multilingual by nature; force UTF-8 everywhere.
+# A narrow platform default stdout encoding (e.g. cp1252) makes printing a
+# title containing a macron, CJK glyph or anything else outside Latin-1 raise
+# UnicodeEncodeError and kill the run. This corpus is multilingual by nature;
+# force UTF-8 everywhere.
 for _stream in (sys.stdout, sys.stderr):
     try:
         _stream.reconfigure(encoding="utf-8", errors="replace")

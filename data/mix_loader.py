@@ -161,10 +161,9 @@ class MixingLoader:
         for name in schedule.slices:
             # Glob our own naming convention rather than trusting the paths in the
             # manifest. Those are written on whatever machine tokenized the corpus
-            # -- a Windows box, in practice -- and `Path("a\b\c.bin").name` on
+            # and may use backslash separators, and `Path("a\b\c.bin").name` on
             # Linux returns the entire string, because POSIX paths have no
-            # backslash separator. Same family of bug as the MSYS2 path mangling
-            # that misrouted 890 MB of uploads (CHANGELOG 2026-08-06).
+            # backslash separator (CHANGELOG 2026-08-06).
             files = sorted(sub.glob(f"{name}_train_*.bin"))
             if not files and name in wanted:
                 raise FileNotFoundError(
